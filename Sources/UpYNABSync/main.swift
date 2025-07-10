@@ -23,7 +23,8 @@ struct UpYNABSync: AsyncParsableCommand {
             ConfigCommand.self,
             SyncCommand.self,
             StatusCommand.self,
-            ReviewCommand.self
+            ReviewCommand.self,
+            InstallCommand.self
         ]
     )
     
