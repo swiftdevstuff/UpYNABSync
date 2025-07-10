@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-class KeychainManager {
+class KeychainManager: @unchecked Sendable {
     static let shared = KeychainManager()
     private init() {}
     
@@ -40,7 +40,7 @@ class KeychainManager {
         ]
         
         // Check if token already exists
-        let status = SecItemCopyMatching(query, nil)
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
         if status == errSecSuccess {
             // Update existing token
             let updateQuery: [String: Any] = [

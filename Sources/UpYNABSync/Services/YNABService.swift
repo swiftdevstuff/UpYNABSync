@@ -1,6 +1,6 @@
 import Foundation
 
-class YNABService {
+class YNABService: @unchecked Sendable {
     static let shared = YNABService()
     private init() {}
     

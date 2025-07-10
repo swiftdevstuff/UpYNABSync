@@ -1,6 +1,6 @@
 import Foundation
 
-class UpBankingService {
+class UpBankingService: @unchecked Sendable {
     static let shared = UpBankingService()
     private init() {}
     

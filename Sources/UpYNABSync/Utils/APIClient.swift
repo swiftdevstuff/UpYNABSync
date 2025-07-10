@@ -1,6 +1,6 @@
 import Foundation
 
-class APIClient {
+class APIClient: @unchecked Sendable {
     static let shared = APIClient()
     private init() {}
     
@@ -203,8 +203,8 @@ class APIClient {
         )
     }
     
-    func withRetry<T>(
-        operation: () async throws -> T,
+    func withRetry<T: Sendable>(
+        operation: @Sendable () async throws -> T,
         maxRetries: Int = 1,
         delay: TimeInterval = 2.0
     ) async throws -> T {

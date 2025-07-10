@@ -1,6 +1,6 @@
 import Foundation
 
-class SyncService {
+class SyncService: @unchecked Sendable {
     static let shared = SyncService()
     private init() {}
     
@@ -329,7 +329,7 @@ class SyncService {
             upAmount: upTransaction.amount.doubleValue,
             upDate: upTransaction.createdAt.upBankingAPIString(),
             upDescription: upTransaction.displayDescription,
-            upRawJson: try? JSONEncoder().encode(upTransaction).base64EncodedString() ?? "",
+            upRawJson: (try? JSONEncoder().encode(upTransaction))?.base64EncodedString() ?? "",
             ynabAccountId: mapping.ynabAccountId,
             ynabTransactionId: ynabTransaction?.id,
             ynabAmount: upTransaction.amount.toYNABAmount(),

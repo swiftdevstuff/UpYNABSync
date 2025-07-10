@@ -1,6 +1,6 @@
 import Foundation
 
-class ConfigManager {
+class ConfigManager: @unchecked Sendable {
     static let shared = ConfigManager()
     private init() {}
     

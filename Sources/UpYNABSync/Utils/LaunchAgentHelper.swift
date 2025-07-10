@@ -1,6 +1,6 @@
 import Foundation
 
-class LaunchAgentHelper {
+class LaunchAgentHelper: @unchecked Sendable {
     static let shared = LaunchAgentHelper()
     private init() {}
     
