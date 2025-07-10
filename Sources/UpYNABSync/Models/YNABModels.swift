@@ -1,0 +1,341 @@
+import Foundation
+
+// MARK: - YNAB API Models
+
+struct YNABBudget: Codable {
+    let id: String
+    let name: String
+    let lastModifiedOn: Date?
+    let firstMonth: String?
+    let lastMonth: String?
+    let dateFormat: YNABDateFormat?
+    let currencyFormat: YNABCurrencyFormat?
+    let accounts: [YNABAccount]?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case lastModifiedOn = "last_modified_on"
+        case firstMonth = "first_month"
+        case lastMonth = "last_month"
+        case dateFormat = "date_format"
+        case currencyFormat = "currency_format"
+        case accounts
+    }
+}
+
+struct YNABAccount: Codable {
+    let id: String
+    let name: String
+    let type: String
+    let onBudget: Bool
+    let closed: Bool
+    let note: String?
+    let balance: Int
+    let clearedBalance: Int
+    let unclearedBalance: Int
+    let transferPayeeId: String?
+    let directImportLinked: Bool?
+    let directImportInError: Bool?
+    let lastReconciledAt: Date?
+    let debtOriginalBalance: Int?
+    let debtInterestRates: [String: Double]?
+    let debtMinimumPayments: [String: Int]?
+    let debtEscrowAmounts: [String: Int]?
+    let deleted: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case type
+        case onBudget = "on_budget"
+        case closed
+        case note
+        case balance
+        case clearedBalance = "cleared_balance"
+        case unclearedBalance = "uncleared_balance"
+        case transferPayeeId = "transfer_payee_id"
+        case directImportLinked = "direct_import_linked"
+        case directImportInError = "direct_import_in_error"
+        case lastReconciledAt = "last_reconciled_at"
+        case debtOriginalBalance = "debt_original_balance"
+        case debtInterestRates = "debt_interest_rates"
+        case debtMinimumPayments = "debt_minimum_payments"
+        case debtEscrowAmounts = "debt_escrow_amounts"
+        case deleted
+    }
+    
+    var formattedBalance: String {
+        let dollars = Double(balance) / 1000.0
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        return formatter.string(from: NSNumber(value: dollars)) ?? "$0.00"
+    }
+    
+    var isActive: Bool {
+        return !closed && !deleted
+    }
+}
+
+struct YNABTransaction: Codable {
+    let id: String?
+    let date: String
+    let amount: Int
+    let memo: String?
+    let payeeName: String?
+    let payeeId: String?
+    let categoryId: String?
+    let categoryName: String?
+    let accountId: String
+    let accountName: String?
+    let transferAccountId: String?
+    let transferTransactionId: String?
+    let matchedTransactionId: String?
+    let importId: String?
+    let importPayeeName: String?
+    let importPayeeNameOriginal: String?
+    let debtTransactionType: String?
+    let deleted: Bool
+    let approved: Bool
+    let flagColor: String?
+    let flagName: String?
+    let cleared: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case date
+        case amount
+        case memo
+        case payeeName = "payee_name"
+        case payeeId = "payee_id"
+        case categoryId = "category_id"
+        case categoryName = "category_name"
+        case accountId = "account_id"
+        case accountName = "account_name"
+        case transferAccountId = "transfer_account_id"
+        case transferTransactionId = "transfer_transaction_id"
+        case matchedTransactionId = "matched_transaction_id"
+        case importId = "import_id"
+        case importPayeeName = "import_payee_name"
+        case importPayeeNameOriginal = "import_payee_name_original"
+        case debtTransactionType = "debt_transaction_type"
+        case deleted
+        case approved
+        case flagColor = "flag_color"
+        case flagName = "flag_name"
+        case cleared
+    }
+    
+    var formattedAmount: String {
+        let dollars = Double(amount) / 1000.0
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        return formatter.string(from: NSNumber(value: dollars)) ?? "$0.00"
+    }
+    
+    var displayPayeeName: String {
+        return payeeName ?? importPayeeName ?? "Unknown Payee"
+    }
+    
+    var displayMemo: String {
+        return memo ?? ""
+    }
+}
+
+struct YNABTransactionRequest: Codable {
+    let accountId: String
+    let payeeName: String?
+    let categoryId: String?
+    let memo: String?
+    let amount: Int
+    let date: String
+    let cleared: String
+    let approved: Bool
+    let flagColor: String?
+    let importId: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case accountId = "account_id"
+        case payeeName = "payee_name"
+        case categoryId = "category_id"
+        case memo
+        case amount
+        case date
+        case cleared
+        case approved
+        case flagColor = "flag_color"
+        case importId = "import_id"
+    }
+    
+    init(accountId: String, payeeName: String?, memo: String?, amount: Int, date: String, importId: String? = nil) {
+        self.accountId = accountId
+        self.payeeName = payeeName
+        self.categoryId = nil
+        self.memo = memo
+        self.amount = amount
+        self.date = date
+        self.cleared = "uncleared"
+        self.approved = true
+        self.flagColor = nil
+        self.importId = importId
+    }
+}
+
+struct YNABDateFormat: Codable {
+    let format: String
+}
+
+struct YNABCurrencyFormat: Codable {
+    let isoCode: String
+    let exampleFormat: String
+    let decimalDigits: Int
+    let decimalSeparator: String
+    let symbolFirst: Bool
+    let groupSeparator: String
+    let currencySymbol: String
+    let displaySymbol: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case isoCode = "iso_code"
+        case exampleFormat = "example_format"
+        case decimalDigits = "decimal_digits"
+        case decimalSeparator = "decimal_separator"
+        case symbolFirst = "symbol_first"
+        case groupSeparator = "group_separator"
+        case currencySymbol = "currency_symbol"
+        case displaySymbol = "display_symbol"
+    }
+}
+
+// MARK: - YNAB API Response Wrappers
+
+struct YNABBudgetsResponse: Codable {
+    let data: YNABBudgetsData
+    
+    struct YNABBudgetsData: Codable {
+        let budgets: [YNABBudget]
+        let defaultBudget: YNABBudget?
+        
+        enum CodingKeys: String, CodingKey {
+            case budgets
+            case defaultBudget = "default_budget"
+        }
+    }
+}
+
+struct YNABBudgetResponse: Codable {
+    let data: YNABBudgetData
+    
+    struct YNABBudgetData: Codable {
+        let budget: YNABBudget
+        let serverKnowledge: Int
+        
+        enum CodingKeys: String, CodingKey {
+            case budget
+            case serverKnowledge = "server_knowledge"
+        }
+    }
+}
+
+struct YNABAccountsResponse: Codable {
+    let data: YNABAccountsData
+    
+    struct YNABAccountsData: Codable {
+        let accounts: [YNABAccount]
+        let serverKnowledge: Int
+        
+        enum CodingKeys: String, CodingKey {
+            case accounts
+            case serverKnowledge = "server_knowledge"
+        }
+    }
+}
+
+struct YNABTransactionsResponse: Codable {
+    let data: YNABTransactionsData
+    
+    struct YNABTransactionsData: Codable {
+        let transactions: [YNABTransaction]
+        let serverKnowledge: Int
+        
+        enum CodingKeys: String, CodingKey {
+            case transactions
+            case serverKnowledge = "server_knowledge"
+        }
+    }
+}
+
+struct YNABTransactionCreateResponse: Codable {
+    let data: YNABTransactionCreateData
+    
+    struct YNABTransactionCreateData: Codable {
+        let transaction: YNABTransaction?
+        let transactions: [YNABTransaction]?
+        let duplicateImportIds: [String]?
+        let serverKnowledge: Int
+        
+        enum CodingKeys: String, CodingKey {
+            case transaction
+            case transactions
+            case duplicateImportIds = "duplicate_import_ids"
+            case serverKnowledge = "server_knowledge"
+        }
+    }
+}
+
+struct YNABTransactionsBulkRequest: Codable {
+    let transactions: [YNABTransactionRequest]
+}
+
+struct YNABErrorResponse: Codable {
+    let error: YNABErrorDetail
+    
+    struct YNABErrorDetail: Codable {
+        let id: String
+        let name: String
+        let description: String
+        let detail: String?
+    }
+}
+
+struct YNABUserResponse: Codable {
+    let data: YNABUserData
+    
+    struct YNABUserData: Codable {
+        let user: YNABUser
+    }
+}
+
+struct YNABUser: Codable {
+    let id: String
+}
+
+// MARK: - Helper Functions
+
+extension YNABTransaction {
+    static func fromUpTransaction(_ upTransaction: UpTransaction, accountId: String, upAccountName: String) -> YNABTransactionRequest {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        
+        let date = upTransaction.settledAt ?? upTransaction.createdAt
+        let dateString = dateFormatter.string(from: date)
+        
+        let memo = [
+            upTransaction.displayDescription,
+            upTransaction.message.map { "Note: \($0)" }
+        ].compactMap { $0 }.joined(separator: " | ")
+        
+        let payeeName = upTransaction.displayDescription
+        let amount = upTransaction.amount.toYNABAmount()
+        let importId = "up-\(upTransaction.id)"
+        
+        return YNABTransactionRequest(
+            accountId: accountId,
+            payeeName: payeeName,
+            memo: memo.isEmpty ? nil : memo,
+            amount: amount,
+            date: dateString,
+            importId: importId
+        )
+    }
+}
