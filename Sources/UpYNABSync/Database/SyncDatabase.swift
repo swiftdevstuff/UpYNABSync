@@ -113,7 +113,7 @@ class SyncDatabase: @unchecked Sendable {
         }
         
         do {
-            try db.run(DatabaseTables.syncedTransactions.insert(
+            try db.run(DatabaseTables.syncedTransactions.insert(or: .replace,
                 DatabaseTables.syncedTransactionId <- transaction.id,
                 DatabaseTables.syncedUpAccountId <- transaction.upAccountId,
                 DatabaseTables.syncedUpAccountName <- transaction.upAccountName,
@@ -128,9 +128,9 @@ class SyncDatabase: @unchecked Sendable {
                 DatabaseTables.syncedStatus <- transaction.status
             ))
             
-            logger.logDatabaseOperation("Inserted", table: "synced_transactions")
+            logger.logDatabaseOperation("Inserted/Updated", table: "synced_transactions")
         } catch {
-            logger.error("Failed to insert synced transaction: \(error)")
+            logger.error("Failed to insert/update synced transaction: \(error)")
             throw DatabaseError.queryFailed(error)
         }
     }
@@ -143,6 +143,7 @@ class SyncDatabase: @unchecked Sendable {
         do {
             let count = try db.scalar(DatabaseTables.syncedTransactions
                 .filter(DatabaseTables.syncedTransactionId == transactionId)
+                .filter(DatabaseTables.syncedStatus == "synced")
                 .count)
             return count > 0
         } catch {
@@ -165,6 +166,107 @@ class SyncDatabase: @unchecked Sendable {
             return rows.map { $0.toSyncedTransaction() }
         } catch {
             logger.error("Failed to get failed transactions: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getTransactionStatus(_ transactionId: String) throws -> String? {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            if let row = try db.pluck(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedTransactionId == transactionId)) {
+                return row[DatabaseTables.syncedStatus]
+            }
+            return nil
+        } catch {
+            logger.error("Failed to get transaction status: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func deleteFailedTransaction(_ transactionId: String) throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let transaction = DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedTransactionId == transactionId)
+                .filter(DatabaseTables.syncedStatus == "failed")
+            
+            let deleted = try db.run(transaction.delete())
+            if deleted > 0 {
+                logger.logDatabaseOperation("Deleted failed transaction", table: "synced_transactions")
+            }
+        } catch {
+            logger.error("Failed to delete failed transaction: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func cleanupFailedTransactions() throws -> Int {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let deleted = try db.run(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedStatus == "failed")
+                .delete())
+            
+            if deleted > 0 {
+                logger.info("Cleaned up \(deleted) failed transaction records")
+            }
+            return deleted
+        } catch {
+            logger.error("Failed to cleanup failed transactions: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func resetPendingTransactions() throws -> Int {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            // Reset pending transactions to allow retry
+            let updated = try db.run(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedStatus == "pending")
+                .update(DatabaseTables.syncedStatus <- "failed"))
+            
+            if updated > 0 {
+                logger.info("Reset \(updated) pending transactions to failed status for retry")
+            }
+            return updated
+        } catch {
+            logger.error("Failed to reset pending transactions: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func cleanupIncorrectlyMarkedTransactions() throws -> Int {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            // Find transactions that were marked as synced but have no YNAB transaction ID
+            // These are likely transactions that failed but were incorrectly marked
+            let updated = try db.run(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedStatus == "synced")
+                .filter(DatabaseTables.syncedYnabTransactionId == nil)
+                .update(DatabaseTables.syncedStatus <- "failed"))
+            
+            if updated > 0 {
+                logger.info("Fixed \(updated) incorrectly marked transactions (synced without YNAB ID)")
+            }
+            return updated
+        } catch {
+            logger.error("Failed to cleanup incorrectly marked transactions: \(error)")
             throw DatabaseError.queryFailed(error)
         }
     }

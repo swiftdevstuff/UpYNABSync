@@ -85,7 +85,18 @@ class UpBankingService: @unchecked Sendable {
                 )
             }
             
-            let accounts = response.data.map { $0.attributes }
+            // Map response to UpAccount by combining id from root level with attributes
+            let accounts = response.data.map { accountData in
+                UpAccount(
+                    id: accountData.id,
+                    displayName: accountData.attributes.displayName,
+                    accountType: accountData.attributes.accountType,
+                    balance: accountData.attributes.balance,
+                    createdAt: accountData.attributes.createdAt,
+                    ownershipType: accountData.attributes.ownershipType
+                )
+            }
+            
             logger.info("Retrieved \(accounts.count) Up Banking accounts")
             return accounts
         } catch let error as APIClient.APIError {
@@ -109,9 +120,19 @@ class UpBankingService: @unchecked Sendable {
                 )
             }
             
-            guard let account = response.data.first?.attributes else {
+            guard let accountData = response.data.first else {
                 throw UpBankingError.accountNotFound
             }
+            
+            // Map response to UpAccount by combining id from root level with attributes
+            let account = UpAccount(
+                id: accountData.id,
+                displayName: accountData.attributes.displayName,
+                accountType: accountData.attributes.accountType,
+                balance: accountData.attributes.balance,
+                createdAt: accountData.attributes.createdAt,
+                ownershipType: accountData.attributes.ownershipType
+            )
             
             return account
         } catch let error as APIClient.APIError {
@@ -177,12 +198,68 @@ class UpBankingService: @unchecked Sendable {
                 )
             }
             
-            let transactions = response.data.map { $0.attributes }
+            // Map response to UpTransaction by combining id from root level with attributes
+            let transactions = response.data.map { transactionData in
+                UpTransaction(
+                    id: transactionData.id,
+                    status: transactionData.attributes.status,
+                    rawText: transactionData.attributes.rawText,
+                    description: transactionData.attributes.description,
+                    message: transactionData.attributes.message,
+                    holdInfo: transactionData.attributes.holdInfo,
+                    roundUp: transactionData.attributes.roundUp,
+                    cashback: transactionData.attributes.cashback,
+                    amount: transactionData.attributes.amount,
+                    foreignAmount: transactionData.attributes.foreignAmount,
+                    settledAt: transactionData.attributes.settledAt,
+                    createdAt: transactionData.attributes.createdAt,
+                    relationships: transactionData.relationships ?? UpTransactionRelationships(
+                        account: UpRelationshipData(data: nil),
+                        transferAccount: nil,
+                        category: nil,
+                        parentCategory: nil,
+                        tags: nil
+                    )
+                )
+            }
+            
             logger.info("Retrieved \(transactions.count) transactions for account \(accountId)")
             return transactions
         } catch let error as APIClient.APIError {
+            logger.error("API Error in getTransactions: \(error)")
             throw mapAPIError(error)
+        } catch let error as DecodingError {
+            logger.error("Transaction JSON decoding error: \(error)")
+            
+            // Log comprehensive, safe debugging info
+            switch error {
+            case .keyNotFound(let key, let context):
+                let path = context.codingPath.map { $0.stringValue }.joined(separator: " -> ")
+                logger.error("Missing key '\(key.stringValue)' at path: \(path)")
+                logger.error("Available keys in context: \(context.debugDescription)")
+            case .typeMismatch(let type, let context):
+                let path = context.codingPath.map { $0.stringValue }.joined(separator: " -> ")
+                logger.error("Type mismatch for \(type) at path: \(path)")
+                logger.error("Context: \(context.debugDescription)")
+            case .valueNotFound(let type, let context):
+                let path = context.codingPath.map { $0.stringValue }.joined(separator: " -> ")
+                logger.error("Value not found for \(type) at path: \(path)")
+                logger.error("Context: \(context.debugDescription)")
+            case .dataCorrupted(let context):
+                let path = context.codingPath.map { $0.stringValue }.joined(separator: " -> ")
+                logger.error("Data corrupted at path: \(path)")
+                logger.error("Context: \(context.debugDescription)")
+            @unknown default:
+                logger.error("Unknown decoding error: \(error)")
+            }
+            
+            // Log structure hints for debugging (safe, no financial data)
+            logger.error("Expected JSON:API structure: { data: [{ id, type, attributes: {...}, relationships: {...} }] }")
+            logger.error("Verify Up Banking API response follows JSON:API specification")
+            
+            throw UpBankingError.invalidResponse
         } catch {
+            logger.error("Network Error in getTransactions: \(error)")
             throw UpBankingError.networkError(error)
         }
     }

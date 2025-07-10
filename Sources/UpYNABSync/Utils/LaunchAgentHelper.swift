@@ -284,4 +284,46 @@ class LaunchAgentHelper: @unchecked Sendable {
         
         return issues
     }
+    
+    // MARK: - Reset Support
+    
+    func getLaunchAgentPlistPath() -> URL {
+        return launchAgentPath
+    }
+    
+    func unload() async throws {
+        guard isLaunchAgentInstalled() else {
+            return
+        }
+        
+        // Unload the Launch Agent
+        let task = Process()
+        task.launchPath = "/bin/launchctl"
+        task.arguments = ["unload", launchAgentPath.path]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+        
+        task.launch()
+        task.waitUntilExit()
+        
+        if task.terminationStatus != 0 {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? "Unknown error"
+            logger.warning("Launch Agent unload failed: \(output)")
+        }
+    }
+    
+    func forceUninstall() async throws {
+        // Force unload first
+        try await unload()
+        
+        // Remove the plist file even if unload failed
+        if fileManager.fileExists(atPath: launchAgentPath.path) {
+            try fileManager.removeItem(at: launchAgentPath)
+        }
+        
+        logger.info("Launch Agent force uninstalled")
+    }
 }

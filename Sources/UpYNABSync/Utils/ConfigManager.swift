@@ -193,6 +193,22 @@ class ConfigManager: @unchecked Sendable {
             throw ConfigError.fileSystemError(error)
         }
     }
+    
+    func removeAllData() throws {
+        guard FileManager.default.fileExists(atPath: configDirectoryPath.path) else {
+            return
+        }
+        
+        do {
+            try FileManager.default.removeItem(at: configDirectoryPath)
+        } catch {
+            throw ConfigError.fileSystemError(error)
+        }
+    }
+    
+    func getConfigDirectoryPath() -> URL {
+        return configDirectoryPath
+    }
 }
 
 extension ConfigManager {

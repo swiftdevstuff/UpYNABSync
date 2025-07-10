@@ -100,10 +100,10 @@ struct ReviewCommand: AsyncParsableCommand, BaseCommand {
         }
     }
     
-    // Simulate review data (in real implementation, this would query the database)
+    // Get review data from database
     private func simulateReviewSummary() async throws -> ReviewSummary {
-        // Check if database has any failed transactions
-        let failedCount = 0 // database.getFailedTransactionCount()
+        // Get actual failed transaction count from database
+        let failedCount = try getFailedTransactionCount()
         
         var itemsByType: [ReviewItem.ReviewItemType: Int] = [:]
         var itemsBySeverity: [ReviewItem.ReviewItemSeverity: Int] = [:]
@@ -120,6 +120,11 @@ struct ReviewCommand: AsyncParsableCommand, BaseCommand {
             actionRequiredCount: failedCount,
             lastReviewDate: Date()
         )
+    }
+    
+    private func getFailedTransactionCount() throws -> Int {
+        let stats = try database.getDatabaseStats()
+        return stats["failed_transactions"] as? Int ?? 0
     }
     
     private func simulateReviewItems() async throws -> [ReviewItem] {

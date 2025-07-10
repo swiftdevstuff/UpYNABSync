@@ -238,6 +238,14 @@ class SyncService: @unchecked Sendable {
             )
         }
         
+        // Mark transaction as pending before attempting sync
+        try await saveSyncedTransaction(
+            upTransaction: transaction,
+            ynabTransaction: nil,
+            mapping: mapping,
+            status: .pending
+        )
+        
         do {
             // Sync to YNAB
             let ynabTransaction = try await ynabService.syncUpTransaction(
@@ -246,7 +254,7 @@ class SyncService: @unchecked Sendable {
                 budgetId: budgetId
             )
             
-            // Save to database
+            // Update database with successful sync
             try await saveSyncedTransaction(
                 upTransaction: transaction,
                 ynabTransaction: ynabTransaction,
@@ -311,8 +319,26 @@ class SyncService: @unchecked Sendable {
         var newTransactions: [UpTransaction] = []
         
         for transaction in transactions {
-            if !(try database.isTransactionSynced(transaction.id)) {
+            let status = try database.getTransactionStatus(transaction.id)
+            
+            switch status {
+            case nil, "pending", "failed":
+                // Transaction never attempted, pending, or failed previously - treat as new
                 newTransactions.append(transaction)
+                if let status = status {
+                    logger.info("Transaction \(transaction.id) has status '\(status)' - treating as new")
+                } else {
+                    logger.debug("Transaction \(transaction.id) not found in database - marking as new")
+                }
+                
+            case "synced":
+                // Transaction successfully synced to YNAB - skip
+                logger.debug("Transaction \(transaction.id) already synced - skipping")
+                
+            default:
+                // Unknown status - treat as new and log warning
+                newTransactions.append(transaction)
+                logger.warning("Transaction \(transaction.id) has unknown status '\(status!)' - treating as new")
             }
         }
         
@@ -446,6 +472,88 @@ class SyncService: @unchecked Sendable {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return "\(formatter.string(from: dateRange.start)) to \(formatter.string(from: dateRange.end))"
+    }
+    
+    // MARK: - Failed Transaction Management
+    
+    func cleanupFailedTransactions() async throws -> Int {
+        logger.info("🧹 Cleaning up failed transaction records...")
+        
+        let deletedCount = try database.cleanupFailedTransactions()
+        
+        if deletedCount > 0 {
+            logger.info("✅ Cleaned up \(deletedCount) failed transaction records")
+        } else {
+            logger.info("✅ No failed transactions to clean up")
+        }
+        
+        return deletedCount
+    }
+    
+    func fixIncorrectlyMarkedTransactions() async throws -> Int {
+        logger.info("🔧 Fixing incorrectly marked transactions...")
+        
+        // Fix transactions marked as synced but without YNAB transaction ID
+        let fixedCount = try database.cleanupIncorrectlyMarkedTransactions()
+        
+        // Reset any pending transactions that got stuck
+        let resetCount = try database.resetPendingTransactions()
+        
+        let totalFixed = fixedCount + resetCount
+        
+        if totalFixed > 0 {
+            logger.info("✅ Fixed \(fixedCount) incorrectly marked and reset \(resetCount) pending transactions")
+        } else {
+            logger.info("✅ No incorrectly marked transactions found")
+        }
+        
+        return totalFixed
+    }
+    
+    func getFailedTransactionsForRetry() async throws -> [SyncedTransaction] {
+        logger.info("🔍 Finding failed transactions for retry...")
+        
+        let failedTransactions = try database.getFailedTransactions(limit: 100)
+        
+        logger.info("📋 Found \(failedTransactions.count) failed transactions")
+        
+        return failedTransactions
+    }
+    
+    func retryFailedTransactions(options: SyncOptions = .default) async throws -> SyncResult {
+        logger.info("🔄 Starting retry of failed transactions")
+        
+        // Get failed transactions
+        let failedTransactions = try await getFailedTransactionsForRetry()
+        
+        if failedTransactions.isEmpty {
+            logger.info("✅ No failed transactions to retry")
+            throw SyncServiceError.noTransactionsFound
+        }
+        
+        // Group by account
+        let transactionsByAccount = Dictionary(grouping: failedTransactions) { $0.upAccountId }
+        
+        // Load configuration to get account mappings
+        let configuration = try loadConfiguration()
+        
+        for (upAccountId, transactions) in transactionsByAccount {
+            guard let mapping = configuration.accountMappings.first(where: { $0.upAccountId == upAccountId }) else {
+                logger.warning("⚠️ No account mapping found for \(upAccountId), skipping \(transactions.count) transactions")
+                continue
+            }
+            
+            logger.info("🔄 Retrying \(transactions.count) failed transactions for \(mapping.displayName)")
+            
+            // Delete failed records so they can be re-attempted
+            for transaction in transactions {
+                try database.deleteFailedTransaction(transaction.id)
+                logger.debug("🗑️ Deleted failed record for transaction \(transaction.id)")
+            }
+        }
+        
+        // Now run a normal sync which will pick up these "new" transactions
+        return try await syncTransactions(options: options)
     }
     
     // MARK: - Status and Health

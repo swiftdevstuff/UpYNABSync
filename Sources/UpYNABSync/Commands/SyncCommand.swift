@@ -41,11 +41,56 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
     @Flag(name: .long, help: "Force sync even if recent sync detected")
     var force: Bool = false
     
+    @Flag(name: .long, help: "Clean up failed transaction records before syncing")
+    var cleanupFailed: Bool = false
+    
+    @Flag(name: .long, help: "Retry previously failed transactions")
+    var retryFailed: Bool = false
+    
+    @Flag(name: .long, help: "Fix incorrectly marked transactions in database")
+    var fixDatabase: Bool = false
+    
     private var syncService: SyncService { SyncService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
     
     func run() async throws {
         try await validatePrerequisites()
+        
+        // Handle database fixes first
+        if fixDatabase {
+            displayInfo("🔧 Fixing incorrectly marked transactions in database...")
+            let fixedCount = try await syncService.fixIncorrectlyMarkedTransactions()
+            if fixedCount > 0 {
+                displaySuccess("Fixed \(fixedCount) incorrectly marked transactions")
+            } else {
+                displayInfo("No incorrectly marked transactions found")
+            }
+        }
+        
+        // Handle cleanup operations
+        if cleanupFailed {
+            displayInfo("🧹 Cleaning up failed transaction records...")
+            let deletedCount = try await syncService.cleanupFailedTransactions()
+            if deletedCount > 0 {
+                displaySuccess("Cleaned up \(deletedCount) failed transaction records")
+            } else {
+                displayInfo("No failed transactions to clean up")
+            }
+            
+            // If only cleanup was requested, exit here
+            if !retryFailed && days == nil && !full && !fixDatabase {
+                return
+            }
+        }
+        
+        // Handle retry operations
+        if retryFailed {
+            displayInfo("🔄 Retrying previously failed transactions...")
+            let syncOptions = SyncOptions(dryRun: dryRun, verbose: verbose)
+            let result = try await syncService.retryFailedTransactions(options: syncOptions)
+            try await displayResults(result: result)
+            return
+        }
         
         let syncOptions = try await buildSyncOptions()
         

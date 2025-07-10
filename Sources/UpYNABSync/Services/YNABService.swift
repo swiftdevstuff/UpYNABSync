@@ -229,6 +229,14 @@ class YNABService: @unchecked Sendable {
         let url = URL(string: "\(baseURL)/budgets/\(budgetId)/transactions")!
         let headers = try getAuthHeaders()
         
+        // Log import_id length for debugging
+        if let importId = transaction.importId {
+            logger.debug("Creating YNAB transaction with import_id: '\(importId)' (length: \(importId.count))")
+            if importId.count > 36 {
+                logger.error("Import ID exceeds 36 character limit: \(importId.count) characters")
+            }
+        }
+        
         let requestBody = YNABTransactionsBulkRequest(transactions: [transaction])
         
         do {
@@ -263,6 +271,16 @@ class YNABService: @unchecked Sendable {
     func createTransactions(budgetId: String, transactions: [YNABTransactionRequest]) async throws -> [YNABTransaction] {
         let url = URL(string: "\(baseURL)/budgets/\(budgetId)/transactions")!
         let headers = try getAuthHeaders()
+        
+        // Log import_id lengths for debugging
+        for (index, transaction) in transactions.enumerated() {
+            if let importId = transaction.importId {
+                logger.debug("Transaction \(index): import_id '\(importId)' (length: \(importId.count))")
+                if importId.count > 36 {
+                    logger.error("Transaction \(index) import ID exceeds 36 character limit: \(importId.count) characters")
+                }
+            }
+        }
         
         let requestBody = YNABTransactionsBulkRequest(transactions: transactions)
         

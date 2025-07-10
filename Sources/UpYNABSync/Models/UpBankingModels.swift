@@ -8,7 +8,7 @@ struct UpAccount: Codable {
     let accountType: String
     let balance: UpAmount
     let createdAt: Date
-    let attributes: UpAccountAttributes?
+    let ownershipType: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -16,7 +16,7 @@ struct UpAccount: Codable {
         case accountType
         case balance
         case createdAt
-        case attributes
+        case ownershipType
     }
     
     var isTransactionAccount: Bool {
@@ -29,10 +29,10 @@ struct UpAccount: Codable {
 }
 
 struct UpAccountAttributes: Codable {
-    let accountType: String?
-    let balance: UpAmount?
-    let createdAt: Date?
-    let displayName: String?
+    let accountType: String
+    let balance: UpAmount
+    let createdAt: Date
+    let displayName: String
     let ownershipType: String?
     
     enum CodingKeys: String, CodingKey {
@@ -81,6 +81,34 @@ struct UpTransaction: Codable {
     
     var displayDescription: String {
         return description.isEmpty ? (rawText ?? "Unknown transaction") : description
+    }
+}
+
+struct UpTransactionAttributes: Codable {
+    let status: String
+    let rawText: String?
+    let description: String
+    let message: String?
+    let holdInfo: UpHoldInfo?
+    let roundUp: UpRoundUp?
+    let cashback: UpCashback?
+    let amount: UpAmount
+    let foreignAmount: UpAmount?
+    let settledAt: Date?
+    let createdAt: Date
+    
+    enum CodingKeys: String, CodingKey {
+        case status
+        case rawText
+        case description
+        case message
+        case holdInfo
+        case roundUp
+        case cashback
+        case amount
+        case foreignAmount
+        case settledAt
+        case createdAt
     }
 }
 
@@ -160,7 +188,7 @@ struct UpAccountsResponse: Codable {
     struct UpAccountData: Codable {
         let type: String
         let id: String
-        let attributes: UpAccount
+        let attributes: UpAccountAttributes
     }
 }
 
@@ -171,7 +199,8 @@ struct UpTransactionsResponse: Codable {
     struct UpTransactionData: Codable {
         let type: String
         let id: String
-        let attributes: UpTransaction
+        let attributes: UpTransactionAttributes
+        let relationships: UpTransactionRelationships?
     }
 }
 

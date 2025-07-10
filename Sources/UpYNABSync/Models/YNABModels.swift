@@ -177,7 +177,26 @@ struct YNABTransactionRequest: Codable {
         self.cleared = "uncleared"
         self.approved = true
         self.flagColor = nil
-        self.importId = importId
+        
+        // Validate and truncate import_id to YNAB's 36-character limit
+        if let importId = importId {
+            self.importId = YNABTransactionRequest.validateImportId(importId)
+        } else {
+            self.importId = nil
+        }
+    }
+    
+    static func validateImportId(_ importId: String) -> String {
+        // YNAB import_id has a maximum length of 36 characters
+        if importId.count <= 36 {
+            return importId
+        } else {
+            // If too long, use the first 36 characters
+            // For UUIDs, this should preserve uniqueness
+            let truncated = String(importId.prefix(36))
+            Logger.shared.warning("Import ID truncated from \(importId.count) to 36 characters: \(importId) -> \(truncated)")
+            return truncated
+        }
     }
 }
 
@@ -327,7 +346,8 @@ extension YNABTransaction {
         
         let payeeName = upTransaction.displayDescription
         let amount = upTransaction.amount.toYNABAmount()
-        let importId = "up-\(upTransaction.id)"
+        // Use Up Banking transaction ID directly (already 36 characters)
+        let importId = YNABTransactionRequest.validateImportId(upTransaction.id)
         
         return YNABTransactionRequest(
             accountId: accountId,
