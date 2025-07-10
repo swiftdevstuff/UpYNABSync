@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 
+@available(macOS 12, *)
 struct UpYNABSync: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "up-ynab-sync",
@@ -18,7 +19,8 @@ struct UpYNABSync: AsyncParsableCommand {
         """,
         version: "1.0.0",
         subcommands: [
-            AuthCommand.self
+            AuthCommand.self,
+            ConfigCommand.self
         ]
     )
     
@@ -225,5 +227,14 @@ func setupSignalHandlers() {
 
 // MARK: - Entry Point
 
-setupSignalHandlers()
-UpYNABSync.main()
+@available(macOS 12, *)
+func runMain() async {
+    setupSignalHandlers()
+    await UpYNABSync.main()
+}
+
+if #available(macOS 12, *) {
+    await runMain()
+} else {
+    fatalError("This tool requires macOS 12 or later")
+}
