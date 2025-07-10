@@ -21,7 +21,9 @@ struct UpYNABSync: AsyncParsableCommand {
         subcommands: [
             AuthCommand.self,
             ConfigCommand.self,
-            SyncCommand.self
+            SyncCommand.self,
+            StatusCommand.self,
+            ReviewCommand.self
         ]
     )
     
