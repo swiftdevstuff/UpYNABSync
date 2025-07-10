@@ -20,7 +20,8 @@ struct UpYNABSync: AsyncParsableCommand {
         version: "1.0.0",
         subcommands: [
             AuthCommand.self,
-            ConfigCommand.self
+            ConfigCommand.self,
+            SyncCommand.self
         ]
     )
     
