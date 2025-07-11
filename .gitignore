@@ -1,4 +1,8 @@
-# Xcode
+# ================================
+# Swift & Xcode Files
+# ================================
+
+# Xcode build artifacts
 .DS_Store
 build/
 DerivedData/
@@ -10,7 +14,7 @@ DerivedData/
 !default.mode2v3
 *.perspectivev3
 !default.perspectivev3
-xcuserdata
+xcuserdata/
 *.xccheckout
 *.moved-aside
 *.xcuserstate
@@ -20,17 +24,68 @@ xcuserdata
 # Swift Package Manager
 .build/
 .swiftpm/
+Package.resolved
 
-# Logs
-*.log
-logs/
+# Swift playgrounds
+timeline.xctimeline
+playground.xcworkspace
 
-# Config files (may contain sensitive data)
+# ================================
+# Security & Sensitive Data
+# ================================
+
+# Configuration files (may contain sensitive data)
 config.json
+*.config
+
+# Database files
 *.db
 *.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 
-# macOS
+# API keys and tokens
+*.key
+*.pem
+*.p12
+*.keychain
+secrets.json
+.env
+.env.local
+.env.production
+
+# User data directories
+.up-ynab-sync/
+up-ynab-sync-data/
+
+# Backup files
+*.backup
+*.bak
+*.tmp
+
+# ================================
+# Logs & Debug Files
+# ================================
+
+# Log files
+*.log
+logs/
+debug/
+crash/
+
+# Performance and debug files
+*.dSYM
+*.dSYM.zip
+*.ipa
+*.app.dSYM.zip
+
+# ================================
+# System Files (macOS)
+# ================================
+
+# macOS system files
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -55,5 +110,82 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-# App-specific
+# ================================
+# IDE & Editor Files
+# ================================
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ================================
+# Testing & CI
+# ================================
+
+# Test results
+test-results/
+coverage/
+*.coverage
+.nyc_output
+
+# Documentation build
+docs/_build/
+
+# ================================
+# Temporary & Cache Files
+# ================================
+
+# Cache directories
+.cache/
+*.cache
+node_modules/
+.npm/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+
+# ================================
+# Application Specific
+# ================================
+
+# UpYNABSync specific files
 .up-ynab-sync/
+sync.db*
+merchant-rules.json
+transaction-cache/
+
+# Launch Agent files (user-specific)
+~/Library/LaunchAgents/com.upynabsync.sync.plist
