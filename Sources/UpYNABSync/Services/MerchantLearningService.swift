@@ -215,7 +215,7 @@ class MerchantLearningService: @unchecked Sendable {
         do {
             try database.initialize()
         } catch {
-            logger.error("❌ Failed to initialize database: \(error)")
+            logger.error("Failed to initialize database: \(error)")
             throw MerchantLearningError.databaseError(error)
         }
     }

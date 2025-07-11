@@ -135,7 +135,7 @@ struct InteractiveInput {
     }
     
     static func readConfirmation(prompt: String, defaultValue: Bool = false) -> Bool {
-        let defaultText = defaultValue ? "Y/n" : "y/N"
+        let defaultText = defaultValue ? "y/n" : "y/n"
         print("\(prompt) (\(defaultText)): ", terminator: "")
         
         guard let input = Swift.readLine() else {

@@ -127,9 +127,6 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
                 unknownTransactions.append(transaction)
             } else {
                 knownTransactions += 1
-                if verbose {
-                    print("  - Known: \(transaction.displayDescription) → \(merchantRule!.categoryName)")
-                }
             }
         }
         
@@ -331,13 +328,6 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
             
             displayInfo("Found \(patterns.count) potential merchant patterns")
             
-            if verbose {
-                displayInfo("Debug: Pattern details:")
-                for (index, pattern) in patterns.enumerated() {
-                    print("  \(index + 1). \(pattern.merchantPattern) → \(pattern.categoryName) (confidence: \(Int(pattern.confidence * 100))%, count: \(pattern.transactionCount))")
-                }
-            }
-            
             let suggestions = patternAnalyzer.suggestMerchantRules(
                 from: patterns,
                 confidenceThreshold: 0.7
@@ -496,19 +486,6 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
         print("Total rules: \(stats["total_rules"] ?? 0)")
         print("Used rules: \(stats["used_rules"] ?? 0)")
         print("Total usage: \(stats["total_usage"] ?? 0)")
-        
-        if verbose {
-            let rules = try merchantLearningService.getAllMerchantRules()
-            if !rules.isEmpty {
-                print("\n📋 Current Rules:")
-                for rule in rules.prefix(10) {
-                    print("• \(rule.merchantPattern) → \(rule.categoryName) (used \(rule.usageCount) times)")
-                }
-                if rules.count > 10 {
-                    print("... and \(rules.count - 10) more rules")
-                }
-            }
-        }
     }
 }
 
