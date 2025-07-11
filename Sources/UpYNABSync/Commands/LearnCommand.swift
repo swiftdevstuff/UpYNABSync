@@ -119,13 +119,21 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
     
     private func filterUnknownTransactions(_ transactions: [UpTransaction]) async throws -> [UpTransaction] {
         var unknownTransactions: [UpTransaction] = []
+        var knownTransactions = 0
         
         for transaction in transactions {
             let merchantRule = try merchantLearningService.getMerchantRule(for: transaction)
             if merchantRule == nil {
                 unknownTransactions.append(transaction)
+            } else {
+                knownTransactions += 1
+                if verbose {
+                    print("  - Known: \(transaction.displayDescription) → \(merchantRule!.categoryName)")
+                }
             }
         }
+        
+        displayInfo("Found \(knownTransactions) transactions with existing rules, \(unknownTransactions.count) unknown transactions")
         
         return unknownTransactions
     }
@@ -308,6 +316,8 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
         let patternAnalyzer = YNABPatternAnalyzer.shared
         
         do {
+            displayInfo("Analyzing YNAB transactions for the last \(days) days...")
+            
             let patterns = try await patternAnalyzer.analyzeCategorizationPatterns(
                 budgetId: config.ynabBudgetId,
                 days: days
@@ -320,6 +330,13 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
             }
             
             displayInfo("Found \(patterns.count) potential merchant patterns")
+            
+            if verbose {
+                displayInfo("Debug: Pattern details:")
+                for (index, pattern) in patterns.enumerated() {
+                    print("  \(index + 1). \(pattern.merchantPattern) → \(pattern.categoryName) (confidence: \(Int(pattern.confidence * 100))%, count: \(pattern.transactionCount))")
+                }
+            }
             
             let suggestions = patternAnalyzer.suggestMerchantRules(
                 from: patterns,

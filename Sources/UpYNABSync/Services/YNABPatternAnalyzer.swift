@@ -38,8 +38,24 @@ class YNABPatternAnalyzer: @unchecked Sendable {
             let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
             let transactions = try await ynabService.getTransactions(budgetId: budgetId, since: cutoffDate)
             
+            logger.debug("🔍 DEBUG: Retrieved \(transactions.count) transactions from YNAB")
+            
             if transactions.isEmpty {
                 throw PatternAnalysisError.insufficientData
+            }
+            
+            // Log sample transaction data to debug field availability
+            if let firstTransaction = transactions.first {
+                logger.debug("🔍 DEBUG: Sample transaction:")
+                logger.debug("  - ID: \(firstTransaction.id ?? "nil")")
+                logger.debug("  - PayeeName: \(firstTransaction.payeeName ?? "nil")")
+                logger.debug("  - ImportPayeeName: \(firstTransaction.importPayeeName ?? "nil")")
+                logger.debug("  - ImportPayeeNameOriginal: \(firstTransaction.importPayeeNameOriginal ?? "nil")")
+                logger.debug("  - CategoryID: \(firstTransaction.categoryId ?? "nil")")
+                logger.debug("  - CategoryName: \(firstTransaction.categoryName ?? "nil")")
+                logger.debug("  - Amount: \(firstTransaction.amount)")
+                logger.debug("  - Date: \(firstTransaction.date)")
+                logger.debug("  - Memo: \(firstTransaction.memo ?? "nil")")
             }
             
             logger.info("Found \(transactions.count) transactions to analyze")
@@ -84,14 +100,23 @@ class YNABPatternAnalyzer: @unchecked Sendable {
     
     private func extractPatternsFromTransactions(_ transactions: [YNABTransaction]) -> [CategoryPattern] {
         var patternGroups: [String: [YNABTransaction]] = [:]
+        var processedCount = 0
+        var skippedCount = 0
         
         for transaction in transactions {
-            guard let payeeName = transaction.payeeName,
+            // Try to get payee name from multiple fields
+            let payeeName = transaction.payeeName ?? 
+                           transaction.importPayeeName ?? 
+                           transaction.importPayeeNameOriginal ?? 
+                           transaction.memo
+            
+            guard let payeeName = payeeName,
                   let categoryId = transaction.categoryId,
                   let categoryName = transaction.categoryName,
                   !payeeName.isEmpty,
                   !categoryId.isEmpty,
                   !categoryName.isEmpty else {
+                skippedCount += 1
                 continue
             }
             
@@ -100,8 +125,14 @@ class YNABPatternAnalyzer: @unchecked Sendable {
             
             if pattern.count >= 3 {
                 patternGroups[pattern, default: []].append(transaction)
+                processedCount += 1
+            } else {
+                skippedCount += 1
             }
         }
+        
+        logger.debug("🔍 DEBUG: Processed \(processedCount) transactions, skipped \(skippedCount) transactions")
+        logger.debug("🔍 DEBUG: Created \(patternGroups.count) pattern groups")
         
         let patterns = patternGroups.compactMap { (pattern, transactions) -> CategoryPattern? in
             guard transactions.count >= 2 else { return nil }
@@ -132,6 +163,8 @@ class YNABPatternAnalyzer: @unchecked Sendable {
                 )
             )
         }
+        
+        logger.debug("🔍 DEBUG: Generated \(patterns.count) patterns from \(patternGroups.count) groups")
         
         return patterns
     }

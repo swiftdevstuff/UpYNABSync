@@ -50,12 +50,23 @@ class SyncDatabase: @unchecked Sendable {
         let dbPath = ConfigManager.shared.getDatabasePath()
         
         do {
+            logger.debug("🔍 DEBUG: Attempting to initialize database at: \(dbPath.path)")
+            
             try ConfigManager.shared.ensureConfigDirectory()
+            logger.debug("🔍 DEBUG: Config directory ensured")
+            
             db = try Connection(dbPath.path)
+            logger.debug("🔍 DEBUG: Database connection established")
+            
             try createTables()
+            logger.debug("🔍 DEBUG: Tables created/verified")
+            
             try migrateDatabase()
+            logger.debug("🔍 DEBUG: Database migration completed")
+            
             logger.info("Database initialized at: \(dbPath.path)")
         } catch {
+            logger.error("🚨 DEBUG: Database initialization failed: \(error)")
             logger.error("Failed to initialize database: \(error)")
             throw DatabaseError.connectionFailed
         }
@@ -120,6 +131,7 @@ class SyncDatabase: @unchecked Sendable {
     
     private func migrateDatabase() throws {
         guard db != nil else {
+            logger.error("🚨 DEBUG: Database connection is nil during migration")
             throw DatabaseError.connectionFailed
         }
         
@@ -127,17 +139,24 @@ class SyncDatabase: @unchecked Sendable {
             let currentVersion = try getCurrentDatabaseVersion()
             let targetVersion = 2
             
+            logger.debug("🔍 DEBUG: Current database version: \(currentVersion), target: \(targetVersion)")
+            
             if currentVersion < targetVersion {
                 logger.info("Migrating database from version \(currentVersion) to \(targetVersion)")
                 
                 if currentVersion < 2 {
+                    logger.debug("🔍 DEBUG: Migrating to version 2")
                     try migrateToVersion2()
+                    logger.debug("🔍 DEBUG: Migration to version 2 completed")
                 }
                 
                 try setDatabaseVersion(targetVersion)
                 logger.info("Database migration completed successfully")
+            } else {
+                logger.debug("🔍 DEBUG: Database already at target version")
             }
         } catch {
+            logger.error("🚨 DEBUG: Database migration failed: \(error)")
             logger.error("Failed to migrate database: \(error)")
             throw DatabaseError.migrationFailed(error)
         }

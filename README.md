@@ -29,7 +29,7 @@ A powerful macOS CLI tool that automatically syncs transactions from Up Banking 
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/UpYNABSync.git
+   git clone https://github.com/swiftdevstuff/UpYNABSync.git
    cd UpYNABSync
    ```
 

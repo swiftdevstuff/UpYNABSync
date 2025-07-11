@@ -56,6 +56,9 @@ class MerchantLearningService: @unchecked Sendable {
     ) throws {
         logger.debug("Creating merchant rule: \(pattern) → \(categoryName)")
         
+        // Ensure database is initialized
+        try ensureDatabaseInitialized()
+        
         // Validate inputs
         guard !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw MerchantLearningError.patternExtractionFailed("Empty pattern")
@@ -90,6 +93,9 @@ class MerchantLearningService: @unchecked Sendable {
     
     /// Finds a merchant rule for a transaction
     func getMerchantRule(for transaction: UpTransaction) throws -> MerchantRule? {
+        // Ensure database is initialized
+        try ensureDatabaseInitialized()
+        
         let pattern = extractMerchantPattern(from: transaction)
         let normalizedPattern = pattern.uppercased()
         
@@ -131,6 +137,8 @@ class MerchantLearningService: @unchecked Sendable {
     
     /// Gets all merchant rules
     func getAllMerchantRules() throws -> [MerchantRule] {
+        try ensureDatabaseInitialized()
+        
         do {
             return try database.getAllMerchantRules()
         } catch {
@@ -182,6 +190,8 @@ class MerchantLearningService: @unchecked Sendable {
     
     /// Gets merchant rule statistics
     func getMerchantRuleStats() throws -> [String: Any] {
+        try ensureDatabaseInitialized()
+        
         do {
             return try database.getMerchantRuleStats()
         } catch {
@@ -200,6 +210,15 @@ class MerchantLearningService: @unchecked Sendable {
     }
     
     // MARK: - Private Methods
+    
+    private func ensureDatabaseInitialized() throws {
+        do {
+            try database.initialize()
+        } catch {
+            logger.error("❌ Failed to initialize database: \(error)")
+            throw MerchantLearningError.databaseError(error)
+        }
+    }
     
     private func extractPatternFromText(_ text: String) -> String {
         let cleaned = text
