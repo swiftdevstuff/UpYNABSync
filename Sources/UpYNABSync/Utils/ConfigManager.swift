@@ -14,10 +14,12 @@ class ConfigManager: @unchecked Sendable {
     struct Configuration: Codable {
         let ynabBudgetId: String
         let accountMappings: [AccountMapping]
+        let categorizationSettings: CategorizationSettings?
         
         enum CodingKeys: String, CodingKey {
             case ynabBudgetId = "ynab_budget_id"
             case accountMappings = "account_mappings"
+            case categorizationSettings = "categorization_settings"
         }
     }
     
@@ -35,6 +37,27 @@ class ConfigManager: @unchecked Sendable {
             case ynabAccountId = "ynab_account_id"
             case ynabAccountName = "ynab_account_name"
         }
+    }
+    
+    struct CategorizationSettings: Codable {
+        let enabled: Bool
+        let autoApplyDuringSync: Bool
+        let minConfidenceThreshold: Double
+        let suggestNewRules: Bool
+        
+        enum CodingKeys: String, CodingKey {
+            case enabled
+            case autoApplyDuringSync = "auto_apply_during_sync"
+            case minConfidenceThreshold = "min_confidence_threshold"
+            case suggestNewRules = "suggest_new_rules"
+        }
+        
+        static let `default` = CategorizationSettings(
+            enabled: false,
+            autoApplyDuringSync: false,
+            minConfidenceThreshold: 0.7,
+            suggestNewRules: true
+        )
     }
     
     enum ConfigError: Error, LocalizedError {
@@ -145,7 +168,8 @@ class ConfigManager: @unchecked Sendable {
             
             config = Configuration(
                 ynabBudgetId: ynabBudgetId,
-                accountMappings: filteredMappings + [newMapping]
+                accountMappings: filteredMappings + [newMapping],
+                categorizationSettings: config.categorizationSettings
             )
         } else {
             // Create new configuration
@@ -159,7 +183,8 @@ class ConfigManager: @unchecked Sendable {
             
             config = Configuration(
                 ynabBudgetId: ynabBudgetId,
-                accountMappings: [newMapping]
+                accountMappings: [newMapping],
+                categorizationSettings: nil
             )
         }
         
@@ -176,7 +201,8 @@ class ConfigManager: @unchecked Sendable {
         
         let newConfig = Configuration(
             ynabBudgetId: config.ynabBudgetId,
-            accountMappings: filteredMappings
+            accountMappings: filteredMappings,
+            categorizationSettings: config.categorizationSettings
         )
         
         try saveConfiguration(newConfig)
@@ -208,6 +234,21 @@ class ConfigManager: @unchecked Sendable {
     
     func getConfigDirectoryPath() -> URL {
         return configDirectoryPath
+    }
+    
+    func updateCategorizationSettings(_ settings: CategorizationSettings) throws {
+        var config = try loadConfiguration()
+        config = Configuration(
+            ynabBudgetId: config.ynabBudgetId,
+            accountMappings: config.accountMappings,
+            categorizationSettings: settings
+        )
+        try saveConfiguration(config)
+    }
+    
+    func getCategorizationSettings() throws -> CategorizationSettings {
+        let config = try loadConfiguration()
+        return config.categorizationSettings ?? .default
     }
 }
 

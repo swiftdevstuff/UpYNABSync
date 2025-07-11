@@ -304,10 +304,124 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
     private func learnFromYNABPatterns() async throws {
         displayInfo("🔍 Learning from existing YNAB categorization patterns")
         
-        // This would analyze existing YNAB transactions to find patterns
-        // For now, we'll show a placeholder
-        displayInfo("YNAB pattern analysis is not yet implemented")
-        displayInfo("Use the regular learning mode to create rules from recent transactions")
+        let config = try configManager.loadConfiguration()
+        let patternAnalyzer = YNABPatternAnalyzer.shared
+        
+        do {
+            let patterns = try await patternAnalyzer.analyzeCategorizationPatterns(
+                budgetId: config.ynabBudgetId,
+                days: days
+            )
+            
+            if patterns.isEmpty {
+                displayInfo("No meaningful patterns found in your YNAB transactions")
+                displayInfo("Try extending the analysis period with --days 60 or --days 90")
+                return
+            }
+            
+            displayInfo("Found \(patterns.count) potential merchant patterns")
+            
+            let suggestions = patternAnalyzer.suggestMerchantRules(
+                from: patterns,
+                confidenceThreshold: 0.7
+            )
+            
+            if suggestions.isEmpty {
+                displayInfo("No high-confidence rule suggestions found")
+                displayInfo("Your existing categorization may already be well-covered")
+                return
+            }
+            
+            try await presentSuggestionsToUser(suggestions)
+            
+        } catch let error as YNABPatternAnalyzer.PatternAnalysisError {
+            displayError(error)
+        } catch {
+            displayError("Pattern analysis failed: \(error.localizedDescription)")
+        }
+    }
+    
+    private func presentSuggestionsToUser(_ suggestions: [MerchantRuleSuggestion]) async throws {
+        print("\n🎯 Merchant Rule Suggestions")
+        print(String(repeating: "=", count: 50))
+        
+        var rulesCreated = 0
+        var rulesSkipped = 0
+        
+        for (index, suggestion) in suggestions.enumerated() {
+            print("\n[\(index + 1)/\(suggestions.count)] Suggestion:")
+            print(String(repeating: "━", count: 50))
+            print("Pattern: \(suggestion.pattern.merchantPattern)")
+            print("Category: \(suggestion.pattern.categoryName)")
+            print("Confidence: \(Int(suggestion.pattern.confidence * 100))%")
+            print("Frequency: \(suggestion.pattern.transactionCount) transactions")
+            print("Description: \(suggestion.description)")
+            
+            if suggestion.shouldAutoApprove && autoApprove {
+                displayInfo("Auto-approving high-confidence suggestion")
+                
+                do {
+                    try await createRuleFromSuggestion(suggestion)
+                    rulesCreated += 1
+                    continue
+                } catch {
+                    displayError("Failed to create rule: \(error.localizedDescription)")
+                    rulesSkipped += 1
+                    continue
+                }
+            }
+            
+            print("\nOptions:")
+            print("1. Create rule")
+            print("2. Skip")
+            print("3. Stop")
+            
+            let choice = InteractiveInput.readChoice(
+                prompt: "Choose an option:",
+                choices: ["Create rule", "Skip", "Stop"]
+            )
+            
+            switch choice {
+            case "Create rule":
+                do {
+                    try await createRuleFromSuggestion(suggestion)
+                    rulesCreated += 1
+                } catch {
+                    displayError("Failed to create rule: \(error.localizedDescription)")
+                    rulesSkipped += 1
+                }
+            case "Skip":
+                rulesSkipped += 1
+            case "Stop":
+                print("\n📊 Final Summary:")
+                print("Rules created: \(rulesCreated)")
+                print("Rules skipped: \(rulesSkipped)")
+                return
+            default:
+                rulesSkipped += 1
+            }
+        }
+        
+        print("\n📊 Final Summary:")
+        print("Rules created: \(rulesCreated)")
+        print("Rules skipped: \(rulesSkipped)")
+    }
+    
+    private func createRuleFromSuggestion(_ suggestion: MerchantRuleSuggestion) async throws {
+        let payeeName = suggestion.pattern.merchantPattern
+            .components(separatedBy: .whitespaces)
+            .map { $0.capitalized }
+            .joined(separator: " ")
+        
+        try merchantLearningService.createMerchantRule(
+            pattern: suggestion.pattern.merchantPattern,
+            categoryId: suggestion.pattern.categoryId,
+            categoryName: suggestion.pattern.categoryName,
+            payeeName: payeeName,
+            confidence: suggestion.pattern.confidence
+        )
+        
+        displaySuccess("Created rule: \(suggestion.pattern.merchantPattern) → \(suggestion.pattern.categoryName)")
     }
     
     // MARK: - Helper Methods

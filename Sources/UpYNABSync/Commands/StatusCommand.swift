@@ -54,6 +54,7 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
             try await displayDatabaseStatus(status)
         }
         
+        try await displayCategorizationStatus()
         try await displaySummaryAndRecommendations(status)
     }
     
@@ -291,6 +292,57 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
         }
         
         print("")
+    }
+    
+    private func displayCategorizationStatus() async throws {
+        let configManager = ConfigManager.shared
+        
+        guard configManager.hasConfiguration() else {
+            return
+        }
+        
+        do {
+            let settings = try configManager.getCategorizationSettings()
+            
+            print("🎯 Categorization:")
+            print("   Status: \(settings.enabled ? "Enabled" : "Disabled")")
+            
+            if settings.enabled {
+                print("   Auto-apply during sync: \(settings.autoApplyDuringSync ? "Yes" : "No")")
+                print("   Min confidence threshold: \(Int(settings.minConfidenceThreshold * 100))%")
+                
+                let merchantService = MerchantLearningService.shared
+                if let rules = try? merchantService.getAllMerchantRules() {
+                    print("   Rules: \(rules.count)")
+                    
+                    if verbose && !rules.isEmpty {
+                        let usedRules = rules.filter { $0.usageCount > 0 }
+                        print("   Used rules: \(usedRules.count)")
+                        
+                        let topRules = rules.sorted { $0.usageCount > $1.usageCount }.prefix(3)
+                        if !topRules.isEmpty {
+                            print("   Top rules:")
+                            for rule in topRules {
+                                print("     • \(rule.merchantPattern) → \(rule.categoryName) (\(rule.usageCount) uses)")
+                            }
+                        }
+                    }
+                    
+                    if let stats = try? merchantService.getMerchantRuleStats() {
+                        if let totalUsage = stats["total_usage"] as? Int, totalUsage > 0 {
+                            print("   Total categorizations: \(totalUsage)")
+                        }
+                    }
+                }
+            } else {
+                print("   💡 Run 'up-ynab-sync config --categorization' to enable categorization")
+            }
+            
+            print("")
+        } catch {
+            print("🎯 Categorization: Error loading settings")
+            print("")
+        }
     }
     
     private func displaySummaryAndRecommendations(_ status: SyncStatus) async throws {

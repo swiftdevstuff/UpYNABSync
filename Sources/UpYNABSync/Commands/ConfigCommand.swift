@@ -29,6 +29,9 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     @Flag(name: .shortAndLong, help: "Show verbose output with account details")
     var verbose: Bool = false
     
+    @Flag(name: .long, help: "Configure categorization settings")
+    var categorization: Bool = false
+    
     private var upBankingService: UpBankingService { UpBankingService.shared }
     private var ynabService: YNABService { YNABService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
@@ -38,6 +41,11 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
         
         if show {
             try await showCurrentConfiguration()
+            return
+        }
+        
+        if categorization {
+            try await configureCategorizationSettings()
             return
         }
         
@@ -84,6 +92,72 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     
     // MARK: - Configuration Display
     
+    private func configureCategorizationSettings() async throws {
+        displayInfo("⚙️ Configuring Categorization Settings")
+        
+        guard configManager.hasConfiguration() else {
+            displayWarning("No configuration found. Run 'up-ynab-sync config' first to set up account mappings.")
+            return
+        }
+        
+        let currentSettings = try configManager.getCategorizationSettings()
+        
+        print("\n📋 Current Settings:")
+        print("Categorization enabled: \(currentSettings.enabled ? "Yes" : "No")")
+        print("Auto-apply during sync: \(currentSettings.autoApplyDuringSync ? "Yes" : "No")")
+        print("Min confidence threshold: \(Int(currentSettings.minConfidenceThreshold * 100))%")
+        print("Suggest new rules: \(currentSettings.suggestNewRules ? "Yes" : "No")")
+        
+        print("\n🔧 Configuration Options:")
+        
+        let enabledValue = InteractiveInput.readConfirmation(
+            prompt: "Enable automatic categorization?",
+            defaultValue: currentSettings.enabled
+        )
+        
+        var autoApplyValue = false
+        var confidenceValue = currentSettings.minConfidenceThreshold
+        var suggestValue = currentSettings.suggestNewRules
+        
+        if enabledValue {
+            autoApplyValue = InteractiveInput.readConfirmation(
+                prompt: "Auto-apply categorization during sync?",
+                defaultValue: currentSettings.autoApplyDuringSync
+            )
+            
+            print("Minimum confidence threshold (50-100%): ", terminator: "")
+            if let input = InteractiveInput.readLine(prompt: ""),
+               let value = Int(input),
+               value >= 50 && value <= 100 {
+                confidenceValue = Double(value) / 100.0
+            } else {
+                confidenceValue = currentSettings.minConfidenceThreshold
+            }
+            
+            suggestValue = InteractiveInput.readConfirmation(
+                prompt: "Suggest new rules during sync?",
+                defaultValue: currentSettings.suggestNewRules
+            )
+        }
+        
+        let newSettings = ConfigManager.CategorizationSettings(
+            enabled: enabledValue,
+            autoApplyDuringSync: autoApplyValue,
+            minConfidenceThreshold: confidenceValue,
+            suggestNewRules: suggestValue
+        )
+        
+        try configManager.updateCategorizationSettings(newSettings)
+        
+        print("\n✅ Categorization settings updated successfully!")
+        print("Categorization: \(newSettings.enabled ? "Enabled" : "Disabled")")
+        if newSettings.enabled {
+            print("Auto-apply: \(newSettings.autoApplyDuringSync ? "Yes" : "No")")
+            print("Confidence threshold: \(Int(newSettings.minConfidenceThreshold * 100))%")
+            print("Suggest new rules: \(newSettings.suggestNewRules ? "Yes" : "No")")
+        }
+    }
+    
     private func showCurrentConfiguration() async throws {
         displayInfo("Current configuration:")
         
@@ -118,6 +192,21 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
                     print("")
                 }
             }
+            
+            // Show categorization settings if available
+            if let categorizationSettings = config.categorizationSettings {
+                print("\n🎯 Categorization Settings:")
+                print("  Enabled: \(categorizationSettings.enabled ? "Yes" : "No")")
+                if categorizationSettings.enabled {
+                    print("  Auto-apply during sync: \(categorizationSettings.autoApplyDuringSync ? "Yes" : "No")")
+                    print("  Min confidence threshold: \(Int(categorizationSettings.minConfidenceThreshold * 100))%")
+                    print("  Suggest new rules: \(categorizationSettings.suggestNewRules ? "Yes" : "No")")
+                }
+            } else {
+                print("\n🎯 Categorization Settings: Not configured")
+                print("  💡 Run 'up-ynab-sync config --categorization' to set up categorization")
+            }
+            
         } catch {
             throw CLIError.configurationError("Failed to load configuration: \(error.localizedDescription)")
         }

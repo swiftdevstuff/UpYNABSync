@@ -39,11 +39,19 @@ struct ReviewCommand: AsyncParsableCommand, BaseCommand {
     @Option(name: .long, help: "Show issues for specific account only")
     var account: String?
     
+    @Flag(name: .long, help: "Review categorization rules and performance")
+    var categorization: Bool = false
+    
     private var syncService: SyncService { SyncService.shared }
     private var database: SyncDatabase { SyncDatabase.shared }
     
     func run() async throws {
         try await validatePrerequisites()
+        
+        if categorization {
+            try await reviewCategorizationPerformance()
+            return
+        }
         
         displayInfo("🔍 Reviewing sync issues and failed transactions...")
         print("")
@@ -500,6 +508,120 @@ struct ReviewCommand: AsyncParsableCommand, BaseCommand {
         }
         
         print("")
+    }
+    
+    // MARK: - Categorization Review
+    
+    private func reviewCategorizationPerformance() async throws {
+        let merchantService = MerchantLearningService.shared
+        let configManager = ConfigManager.shared
+        
+        guard configManager.hasConfiguration() else {
+            displayWarning("No configuration found. Run 'up-ynab-sync config' first.")
+            return
+        }
+        
+        let settings = try configManager.getCategorizationSettings()
+        let rules = try merchantService.getAllMerchantRules()
+        
+        print("📊 Categorization Rules Performance Review")
+        print(String(repeating: "=", count: 60))
+        print("")
+        
+        print("⚙️ Settings:")
+        print("   Status: \(settings.enabled ? "Enabled" : "Disabled")")
+        if settings.enabled {
+            print("   Auto-apply during sync: \(settings.autoApplyDuringSync ? "Yes" : "No")")
+            print("   Min confidence threshold: \(Int(settings.minConfidenceThreshold * 100))%")
+            print("   Suggest new rules: \(settings.suggestNewRules ? "Yes" : "No")")
+        }
+        print("")
+        
+        if rules.isEmpty {
+            print("💡 No merchant rules created yet.")
+            print("   • Run 'up-ynab-sync learn' to create categorization rules")
+            print("   • Run 'up-ynab-sync learn --from-ynab' to analyze existing YNAB patterns")
+            return
+        }
+        
+        let usedRules = rules.filter { $0.usageCount > 0 }
+        let unusedRules = rules.filter { $0.usageCount == 0 }
+        let totalUsage = rules.reduce(0) { $0 + $1.usageCount }
+        
+        print("📈 Overall Statistics:")
+        print("   Total rules: \(rules.count)")
+        print("   Used rules: \(usedRules.count)")
+        print("   Unused rules: \(unusedRules.count)")
+        print("   Total categorizations: \(totalUsage)")
+        print("")
+        
+        if !usedRules.isEmpty {
+            print("🏆 Top Performing Rules:")
+            print(String(repeating: "-", count: 40))
+            
+            let topRules = usedRules.sorted { $0.usageCount > $1.usageCount }.prefix(10)
+            for (index, rule) in topRules.enumerated() {
+                let number = String(format: "%2d", index + 1)
+                print("[\(number)] \(rule.merchantPattern)")
+                print("     Category: \(rule.categoryName)")
+                print("     Usage: \(rule.usageCount) times")
+                print("     Confidence: \(Int(rule.confidence * 100))%")
+                if let lastUsed = rule.lastUsed {
+                    print("     Last used: \(lastUsed)")
+                }
+                print("")
+            }
+        }
+        
+        if !unusedRules.isEmpty {
+            print("⚠️  Unused Rules (\(unusedRules.count)):")
+            print(String(repeating: "-", count: 40))
+            
+            for (index, rule) in unusedRules.enumerated() {
+                let number = String(format: "%2d", index + 1)
+                print("[\(number)] \(rule.merchantPattern) → \(rule.categoryName)")
+                if verbose {
+                    print("     Created: \(rule.createdAt)")
+                }
+            }
+            print("")
+            
+            if !verbose {
+                print("💡 Consider removing unused rules or checking if patterns need adjustment")
+                print("   Run with --verbose for more details")
+            }
+        }
+        
+        let categoryGroups = Dictionary(grouping: usedRules) { $0.categoryName }
+        if !categoryGroups.isEmpty {
+            print("📊 Category Distribution:")
+            print(String(repeating: "-", count: 40))
+            
+            let sortedCategories = categoryGroups.sorted { $0.value.count > $1.value.count }
+            for (category, categoryRules) in sortedCategories {
+                let totalUsage = categoryRules.reduce(0) { $0 + $1.usageCount }
+                print("\(category): \(categoryRules.count) rules, \(totalUsage) uses")
+            }
+        }
+        
+        print("")
+        print("💡 Recommendations:")
+        
+        if !settings.enabled {
+            print("   • Enable categorization in settings: 'up-ynab-sync config --categorization'")
+        }
+        
+        if unusedRules.count > 5 {
+            print("   • Consider cleaning up unused rules: 'up-ynab-sync rules --list'")
+        }
+        
+        if usedRules.count < 5 {
+            print("   • Create more rules for better automation: 'up-ynab-sync learn'")
+        }
+        
+        if totalUsage > 50 {
+            print("   • Great job! Your categorization rules are working well")
+        }
     }
     
     // MARK: - Helper Methods
