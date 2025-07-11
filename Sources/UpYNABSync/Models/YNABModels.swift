@@ -329,6 +329,103 @@ struct YNABUser: Codable {
     let id: String
 }
 
+struct YNABCategory: Codable {
+    let id: String
+    let name: String
+    let categoryGroupId: String
+    let categoryGroupName: String?
+    let hidden: Bool
+    let originalCategoryGroupId: String?
+    let note: String?
+    let budgeted: Int
+    let activity: Int
+    let balance: Int
+    let goalType: String?
+    let goalDay: Int?
+    let goalCadence: Int?
+    let goalCadenceFrequency: Int?
+    let goalCreationMonth: String?
+    let goalTarget: Int?
+    let goalTargetMonth: String?
+    let goalPercentageComplete: Int?
+    let goalMonthsToBudget: Int?
+    let goalUnderFunded: Int?
+    let goalOverallFunded: Int?
+    let goalOverallLeft: Int?
+    let deleted: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case categoryGroupId = "category_group_id"
+        case categoryGroupName = "category_group_name"
+        case hidden
+        case originalCategoryGroupId = "original_category_group_id"
+        case note
+        case budgeted
+        case activity
+        case balance
+        case goalType = "goal_type"
+        case goalDay = "goal_day"
+        case goalCadence = "goal_cadence"
+        case goalCadenceFrequency = "goal_cadence_frequency"
+        case goalCreationMonth = "goal_creation_month"
+        case goalTarget = "goal_target"
+        case goalTargetMonth = "goal_target_month"
+        case goalPercentageComplete = "goal_percentage_complete"
+        case goalMonthsToBudget = "goal_months_to_budget"
+        case goalUnderFunded = "goal_under_funded"
+        case goalOverallFunded = "goal_overall_funded"
+        case goalOverallLeft = "goal_overall_left"
+        case deleted
+    }
+    
+    var isActive: Bool {
+        return !hidden && !deleted
+    }
+    
+    var displayName: String {
+        if let groupName = categoryGroupName {
+            return "\(groupName): \(name)"
+        }
+        return name
+    }
+}
+
+struct YNABCategoryGroup: Codable {
+    let id: String
+    let name: String
+    let hidden: Bool
+    let deleted: Bool
+    let categories: [YNABCategory]?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case hidden
+        case deleted
+        case categories
+    }
+    
+    var isActive: Bool {
+        return !hidden && !deleted
+    }
+}
+
+struct YNABCategoriesResponse: Codable {
+    let data: YNABCategoriesData
+    
+    struct YNABCategoriesData: Codable {
+        let categoryGroups: [YNABCategoryGroup]
+        let serverKnowledge: Int
+        
+        enum CodingKeys: String, CodingKey {
+            case categoryGroups = "category_groups"
+            case serverKnowledge = "server_knowledge"
+        }
+    }
+}
+
 // MARK: - Helper Functions
 
 extension YNABTransaction {

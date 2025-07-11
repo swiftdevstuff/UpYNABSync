@@ -399,6 +399,100 @@ class YNABService: @unchecked Sendable {
         }
     }
     
+    // MARK: - Categories
+    
+    func getCategories(budgetId: String) async throws -> [YNABCategory] {
+        let url = URL(string: "\(baseURL)/budgets/\(budgetId)/categories")!
+        let headers = try getAuthHeaders()
+        
+        do {
+            let response = try await apiClient.withRetry {
+                try await self.apiClient.get(
+                    url: url,
+                    headers: headers,
+                    responseType: YNABCategoriesResponse.self,
+                    serviceName: "YNAB"
+                )
+            }
+            
+            // Flatten categories from all category groups
+            let categories = response.data.categoryGroups.flatMap { group in
+                group.categories?.compactMap { category in
+                    // Add category group name to each category
+                    YNABCategory(
+                        id: category.id,
+                        name: category.name,
+                        categoryGroupId: category.categoryGroupId,
+                        categoryGroupName: group.name,
+                        hidden: category.hidden,
+                        originalCategoryGroupId: category.originalCategoryGroupId,
+                        note: category.note,
+                        budgeted: category.budgeted,
+                        activity: category.activity,
+                        balance: category.balance,
+                        goalType: category.goalType,
+                        goalDay: category.goalDay,
+                        goalCadence: category.goalCadence,
+                        goalCadenceFrequency: category.goalCadenceFrequency,
+                        goalCreationMonth: category.goalCreationMonth,
+                        goalTarget: category.goalTarget,
+                        goalTargetMonth: category.goalTargetMonth,
+                        goalPercentageComplete: category.goalPercentageComplete,
+                        goalMonthsToBudget: category.goalMonthsToBudget,
+                        goalUnderFunded: category.goalUnderFunded,
+                        goalOverallFunded: category.goalOverallFunded,
+                        goalOverallLeft: category.goalOverallLeft,
+                        deleted: category.deleted
+                    )
+                } ?? []
+            }
+            
+            logger.info("Retrieved \(categories.count) categories from budget \(budgetId)")
+            return categories.filter { $0.isActive }
+        } catch let error as APIClient.APIError {
+            logger.error("Failed to get categories: \(error)")
+            throw mapAPIError(error)
+        } catch {
+            logger.error("Failed to get categories: \(error)")
+            throw YNABError.networkError(error)
+        }
+    }
+    
+    func getCategoryGroups(budgetId: String) async throws -> [YNABCategoryGroup] {
+        let url = URL(string: "\(baseURL)/budgets/\(budgetId)/categories")!
+        let headers = try getAuthHeaders()
+        
+        do {
+            let response = try await apiClient.withRetry {
+                try await self.apiClient.get(
+                    url: url,
+                    headers: headers,
+                    responseType: YNABCategoriesResponse.self,
+                    serviceName: "YNAB"
+                )
+            }
+            
+            logger.info("Retrieved \(response.data.categoryGroups.count) category groups from budget \(budgetId)")
+            return response.data.categoryGroups.filter { $0.isActive }
+        } catch let error as APIClient.APIError {
+            logger.error("Failed to get category groups: \(error)")
+            throw mapAPIError(error)
+        } catch {
+            logger.error("Failed to get category groups: \(error)")
+            throw YNABError.networkError(error)
+        }
+    }
+    
+    func getCategory(budgetId: String, categoryId: String) async throws -> YNABCategory {
+        let categories = try await getCategories(budgetId: budgetId)
+        
+        guard let category = categories.first(where: { $0.id == categoryId }) else {
+            throw YNABError.accountNotFound  // We'll reuse this error since there's no categoryNotFound
+        }
+        
+        return category
+    }
+    
     // MARK: - Utility Methods
     
     func getBudgetName(budgetId: String) async throws -> String {
