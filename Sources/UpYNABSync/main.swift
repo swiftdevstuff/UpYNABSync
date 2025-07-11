@@ -28,7 +28,7 @@ struct UpYNABSync: AsyncParsableCommand {
         
         For help with any command, use --help (e.g., 'up-ynab-sync sync --help')
         """,
-        version: "1.0.0",
+        version: "1.1.1",
         subcommands: [
             AuthCommand.self,
             ConfigCommand.self,

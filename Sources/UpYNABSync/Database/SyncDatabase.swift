@@ -47,6 +47,11 @@ class SyncDatabase: @unchecked Sendable {
     }
     
     func initialize() throws {
+        // Don't reinitialize if already connected
+        if db != nil {
+            return
+        }
+        
         let dbPath = ConfigManager.shared.getDatabasePath()
         
         do {
