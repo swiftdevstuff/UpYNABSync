@@ -337,7 +337,7 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
         } catch let error as YNABPatternAnalyzer.PatternAnalysisError {
             displayError(error)
         } catch {
-            displayError("Pattern analysis failed: \(error.localizedDescription)")
+            displayError(CLIError.syncError("Pattern analysis failed: \(error.localizedDescription)"))
         }
     }
     
@@ -365,7 +365,7 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
                     rulesCreated += 1
                     continue
                 } catch {
-                    displayError("Failed to create rule: \(error.localizedDescription)")
+                    displayError(CLIError.syncError("Failed to create rule: \(error.localizedDescription)"))
                     rulesSkipped += 1
                     continue
                 }
@@ -387,7 +387,7 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
                     try await createRuleFromSuggestion(suggestion)
                     rulesCreated += 1
                 } catch {
-                    displayError("Failed to create rule: \(error.localizedDescription)")
+                    displayError(CLIError.syncError("Failed to create rule: \(error.localizedDescription)"))
                     rulesSkipped += 1
                 }
             case "Skip":

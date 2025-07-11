@@ -117,7 +117,8 @@ final class UtilityTests: XCTestCase {
         
         let testConfig = ConfigManager.Configuration(
             ynabBudgetId: "test-budget-id",
-            accountMappings: [testMapping]
+            accountMappings: [testMapping],
+            categorizationSettings: nil
         )
         
         // Test saving configuration
@@ -267,7 +268,8 @@ final class UtilityTests: XCTestCase {
         
         let config = ConfigManager.Configuration(
             ynabBudgetId: "test-budget",
-            accountMappings: mappings
+            accountMappings: mappings,
+            categorizationSettings: nil
         )
         
         // Test save/load performance

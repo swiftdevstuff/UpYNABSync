@@ -256,7 +256,8 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
         // Step 5: Save configuration
         let configuration = ConfigManager.Configuration(
             ynabBudgetId: selectedBudget.id,
-            accountMappings: mappings
+            accountMappings: mappings,
+            categorizationSettings: nil
         )
         
         try configManager.saveConfiguration(configuration)
