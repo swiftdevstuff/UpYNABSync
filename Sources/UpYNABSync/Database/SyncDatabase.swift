@@ -15,6 +15,10 @@ class SyncDatabase: @unchecked Sendable {
         case transactionNotFound
         case duplicateTransaction
         case invalidData
+        case ruleAlreadyExists(String)
+        case ruleNotFound(String)
+        case invalidPattern(String)
+        case categoryNotFound(String)
         
         var errorDescription: String? {
             switch self {
@@ -30,6 +34,14 @@ class SyncDatabase: @unchecked Sendable {
                 return "Transaction already exists in database"
             case .invalidData:
                 return "Invalid data provided to database"
+            case .ruleAlreadyExists(let pattern):
+                return "Merchant rule already exists for pattern: \(pattern)"
+            case .ruleNotFound(let pattern):
+                return "Merchant rule not found for pattern: \(pattern)"
+            case .invalidPattern(let pattern):
+                return "Invalid merchant pattern: \(pattern)"
+            case .categoryNotFound(let categoryId):
+                return "Category not found: \(categoryId)"
             }
         }
     }
@@ -41,6 +53,7 @@ class SyncDatabase: @unchecked Sendable {
             try ConfigManager.shared.ensureConfigDirectory()
             db = try Connection(dbPath.path)
             try createTables()
+            try migrateDatabase()
             logger.info("Database initialized at: \(dbPath.path)")
         } catch {
             logger.error("Failed to initialize database: \(error)")
@@ -101,6 +114,126 @@ class SyncDatabase: @unchecked Sendable {
             logger.logDatabaseOperation("Created", table: "all tables")
         } catch {
             logger.error("Failed to create database tables: \(error)")
+            throw DatabaseError.migrationFailed(error)
+        }
+    }
+    
+    private func migrateDatabase() throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let currentVersion = try getCurrentDatabaseVersion()
+            let targetVersion = 2
+            
+            if currentVersion < targetVersion {
+                logger.info("Migrating database from version \(currentVersion) to \(targetVersion)")
+                
+                if currentVersion < 2 {
+                    try migrateToVersion2()
+                }
+                
+                try setDatabaseVersion(targetVersion)
+                logger.info("Database migration completed successfully")
+            }
+        } catch {
+            logger.error("Failed to migrate database: \(error)")
+            throw DatabaseError.migrationFailed(error)
+        }
+    }
+    
+    private func getCurrentDatabaseVersion() throws -> Int {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            // Check if database_version table exists
+            let tableExists = try db.scalar(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='database_version'"
+            ) as! Int64
+            
+            if tableExists == 0 {
+                // Create database_version table
+                try db.run(DatabaseTables.databaseVersion.create { t in
+                    t.column(DatabaseTables.versionId, primaryKey: .autoincrement)
+                    t.column(DatabaseTables.versionNumber)
+                    t.column(DatabaseTables.versionUpdatedAt)
+                })
+                
+                // Insert initial version
+                try db.run(DatabaseTables.databaseVersion.insert(
+                    DatabaseTables.versionNumber <- 1,
+                    DatabaseTables.versionUpdatedAt <- ISO8601DateFormatter().string(from: Date())
+                ))
+                
+                return 1
+            }
+            
+            // Get current version
+            if let row = try db.pluck(DatabaseTables.databaseVersion.order(DatabaseTables.versionId.desc).limit(1)) {
+                return row[DatabaseTables.versionNumber]
+            }
+            
+            return 1
+        } catch {
+            logger.error("Failed to get database version: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    private func setDatabaseVersion(_ version: Int) throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            try db.run(DatabaseTables.databaseVersion.insert(
+                DatabaseTables.versionNumber <- version,
+                DatabaseTables.versionUpdatedAt <- ISO8601DateFormatter().string(from: Date())
+            ))
+        } catch {
+            logger.error("Failed to set database version: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    private func migrateToVersion2() throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            // Create merchant_rules table
+            try db.run(DatabaseTables.merchantRules.create(ifNotExists: true) { t in
+                t.column(DatabaseTables.merchantRuleId, primaryKey: .autoincrement)
+                t.column(DatabaseTables.merchantRulePattern, unique: true)
+                t.column(DatabaseTables.merchantRuleCategoryId)
+                t.column(DatabaseTables.merchantRuleCategoryName)
+                t.column(DatabaseTables.merchantRulePayeeName)
+                t.column(DatabaseTables.merchantRuleConfidence, defaultValue: 1.0)
+                t.column(DatabaseTables.merchantRuleUsageCount, defaultValue: 0)
+                t.column(DatabaseTables.merchantRuleLastUsed)
+                t.column(DatabaseTables.merchantRuleCreatedAt)
+                t.column(DatabaseTables.merchantRuleUpdatedAt)
+            })
+            
+            // Create categorization_history table
+            try db.run(DatabaseTables.categorizationHistory.create(ifNotExists: true) { t in
+                t.column(DatabaseTables.historyId, primaryKey: .autoincrement)
+                t.column(DatabaseTables.historyTransactionId)
+                t.column(DatabaseTables.historyMerchantPattern)
+                t.column(DatabaseTables.historySuggestedCategoryId)
+                t.column(DatabaseTables.historyAppliedCategoryId)
+                t.column(DatabaseTables.historyUserAccepted, defaultValue: false)
+                t.column(DatabaseTables.historyConfidence)
+                t.column(DatabaseTables.historyCreatedAt)
+            })
+            
+            logger.info("Successfully migrated database to version 2 - added merchant learning tables")
+        } catch {
+            logger.error("Failed to migrate to version 2: \(error)")
             throw DatabaseError.migrationFailed(error)
         }
     }
@@ -532,6 +665,175 @@ class SyncDatabase: @unchecked Sendable {
             return true
         } catch {
             logger.error("Failed to validate database integrity: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    // MARK: - Merchant Learning
+    
+    func insertMerchantRule(_ rule: MerchantRule) throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            try db.run(DatabaseTables.merchantRules.insert(or: .replace,
+                DatabaseTables.merchantRulePattern <- rule.merchantPattern,
+                DatabaseTables.merchantRuleCategoryId <- rule.categoryId,
+                DatabaseTables.merchantRuleCategoryName <- rule.categoryName,
+                DatabaseTables.merchantRulePayeeName <- rule.payeeName,
+                DatabaseTables.merchantRuleConfidence <- rule.confidence,
+                DatabaseTables.merchantRuleUsageCount <- rule.usageCount,
+                DatabaseTables.merchantRuleLastUsed <- rule.lastUsed,
+                DatabaseTables.merchantRuleCreatedAt <- rule.createdAt,
+                DatabaseTables.merchantRuleUpdatedAt <- rule.updatedAt
+            ))
+            
+            logger.logDatabaseOperation("Inserted/Updated", table: "merchant_rules")
+        } catch {
+            logger.error("Failed to insert merchant rule: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getMerchantRule(_ pattern: String) throws -> MerchantRule? {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            if let row = try db.pluck(DatabaseTables.merchantRules
+                .filter(DatabaseTables.merchantRulePattern == pattern)) {
+                return row.toMerchantRule()
+            }
+            return nil
+        } catch {
+            logger.error("Failed to get merchant rule: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getAllMerchantRules() throws -> [MerchantRule] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rows = try db.prepare(DatabaseTables.merchantRules
+                .order(DatabaseTables.merchantRuleUsageCount.desc))
+            
+            return rows.map { $0.toMerchantRule() }
+        } catch {
+            logger.error("Failed to get all merchant rules: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func updateMerchantRuleUsage(_ pattern: String) throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rule = DatabaseTables.merchantRules.filter(DatabaseTables.merchantRulePattern == pattern)
+            let now = ISO8601DateFormatter().string(from: Date())
+            
+            let updated = try db.run(rule.update(
+                DatabaseTables.merchantRuleUsageCount <- DatabaseTables.merchantRuleUsageCount + 1,
+                DatabaseTables.merchantRuleLastUsed <- now,
+                DatabaseTables.merchantRuleUpdatedAt <- now
+            ))
+            
+            if updated == 0 {
+                throw DatabaseError.ruleNotFound(pattern)
+            }
+            
+            logger.logDatabaseOperation("Updated usage", table: "merchant_rules")
+        } catch {
+            logger.error("Failed to update merchant rule usage: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func deleteMerchantRule(_ pattern: String) throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rule = DatabaseTables.merchantRules.filter(DatabaseTables.merchantRulePattern == pattern)
+            let deleted = try db.run(rule.delete())
+            
+            if deleted == 0 {
+                throw DatabaseError.ruleNotFound(pattern)
+            }
+            
+            logger.logDatabaseOperation("Deleted", table: "merchant_rules")
+        } catch {
+            logger.error("Failed to delete merchant rule: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func insertCategorizationHistory(_ history: CategorizationHistory) throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            try db.run(DatabaseTables.categorizationHistory.insert(
+                DatabaseTables.historyTransactionId <- history.transactionId,
+                DatabaseTables.historyMerchantPattern <- history.merchantPattern,
+                DatabaseTables.historySuggestedCategoryId <- history.suggestedCategoryId,
+                DatabaseTables.historyAppliedCategoryId <- history.appliedCategoryId,
+                DatabaseTables.historyUserAccepted <- history.userAccepted,
+                DatabaseTables.historyConfidence <- history.confidence,
+                DatabaseTables.historyCreatedAt <- history.createdAt
+            ))
+            
+            logger.logDatabaseOperation("Inserted", table: "categorization_history")
+        } catch {
+            logger.error("Failed to insert categorization history: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getCategorizationHistory(limit: Int = 100) throws -> [CategorizationHistory] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rows = try db.prepare(DatabaseTables.categorizationHistory
+                .order(DatabaseTables.historyCreatedAt.desc)
+                .limit(limit))
+            
+            return rows.map { $0.toCategorizationHistory() }
+        } catch {
+            logger.error("Failed to get categorization history: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getMerchantRuleStats() throws -> [String: Any] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let totalRules = try db.scalar(DatabaseTables.merchantRules.count)
+            let usedRules = try db.scalar(DatabaseTables.merchantRules
+                .filter(DatabaseTables.merchantRuleUsageCount > 0).count)
+            let totalUsage = try db.scalar(DatabaseTables.merchantRules
+                .select(DatabaseTables.merchantRuleUsageCount.sum)) ?? 0
+            
+            return [
+                "total_rules": totalRules,
+                "used_rules": usedRules,
+                "total_usage": totalUsage
+            ]
+        } catch {
+            logger.error("Failed to get merchant rule stats: \(error)")
             throw DatabaseError.queryFailed(error)
         }
     }
