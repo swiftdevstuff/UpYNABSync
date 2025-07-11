@@ -27,6 +27,20 @@ A powerful macOS CLI tool that automatically syncs transactions from Up Banking 
 
 ### Installation
 
+### Option 1: Homebrew (Recommended)
+
+```bash
+# Add the tap
+brew tap swiftdevstuff/upynabsync
+
+# Install UpYNABSync
+brew install up-ynab-sync
+
+# Verify installation
+up-ynab-sync --version
+```
+### Option 2: Build from Source
+
 1. **Clone the repository**
    ```bash
    git clone https://github.com/swiftdevstuff/UpYNABSync.git
