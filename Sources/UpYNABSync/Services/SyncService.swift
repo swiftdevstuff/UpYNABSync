@@ -9,6 +9,7 @@ class SyncService: @unchecked Sendable {
     private let database = SyncDatabase.shared
     private let configManager = ConfigManager.shared
     private let logger = Logger.shared
+    private let merchantLearningService = MerchantLearningService.shared
     
     enum SyncServiceError: Error, LocalizedError {
         case configurationMissing
@@ -247,11 +248,28 @@ class SyncService: @unchecked Sendable {
         )
         
         do {
+            // Apply merchant categorization if enabled
+            var merchantRule: MerchantRule? = nil
+            if options.enableCategorization {
+                do {
+                    merchantRule = try merchantLearningService.getMerchantRule(for: transaction)
+                    if let rule = merchantRule {
+                        logger.info("🎯 Applying merchant rule: \(rule.merchantPattern) → \(rule.categoryName)")
+                        // Update usage statistics
+                        try merchantLearningService.updateRuleUsage(rule)
+                    }
+                } catch {
+                    logger.warning("⚠️ Failed to get merchant rule: \(error.localizedDescription)")
+                    // Continue without categorization
+                }
+            }
+            
             // Sync to YNAB
             let ynabTransaction = try await ynabService.syncUpTransaction(
                 transaction,
                 toAccount: mapping.ynabAccountId,
-                budgetId: budgetId
+                budgetId: budgetId,
+                merchantRule: merchantRule
             )
             
             // Update database with successful sync
@@ -262,7 +280,11 @@ class SyncService: @unchecked Sendable {
                 status: .synced
             )
             
-            logger.info("✅ Synced transaction: \(transaction.displayDescription) (\(transaction.amount.formattedValue))")
+            if let rule = merchantRule {
+                logger.info("✅ Synced transaction with categorization: \(transaction.displayDescription) (\(transaction.amount.formattedValue)) → \(rule.categoryName)")
+            } else {
+                logger.info("✅ Synced transaction: \(transaction.displayDescription) (\(transaction.amount.formattedValue))")
+            }
             
             return SyncedTransactionResult(
                 upTransaction: transaction,

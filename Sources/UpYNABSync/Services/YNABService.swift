@@ -323,6 +323,20 @@ class YNABService: @unchecked Sendable {
         return try await createTransaction(budgetId: budgetId, transaction: ynabTransaction)
     }
     
+    func syncUpTransaction(_ upTransaction: UpTransaction, toAccount accountId: String, budgetId: String, merchantRule: MerchantRule?) async throws -> YNABTransaction {
+        let ynabTransaction = YNABTransaction.fromUpTransaction(upTransaction, accountId: accountId, upAccountName: "", merchantRule: merchantRule)
+        
+        // Validate amount conversion
+        let expectedYNABAmount = upTransaction.amount.toYNABAmount()
+        guard upTransaction.amount.validateYNABConversion(expectedYNABAmount) else {
+            throw YNABError.serverError("Amount conversion validation failed")
+        }
+        
+        logger.logAmountConversion(upAmount: upTransaction.amount.valueInBaseUnits, ynabAmount: expectedYNABAmount)
+        
+        return try await createTransaction(budgetId: budgetId, transaction: ynabTransaction)
+    }
+    
     // MARK: - Bulk Operations
     
     func syncUpTransactions(_ upTransactions: [UpTransaction], toAccount accountId: String, budgetId: String) async throws -> [YNABTransaction] {

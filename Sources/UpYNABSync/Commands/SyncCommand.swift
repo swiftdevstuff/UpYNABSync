@@ -12,17 +12,20 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
         • Use --days to sync the last N days
         • Use --full for custom date range selection
         • Use --dry-run to see what would be synced without making changes
+        • Use --categorize to enable automatic merchant categorization
         
         Prerequisites:
         • API tokens must be set up (run 'up-ynab-sync auth')
         • Account mappings must be configured (run 'up-ynab-sync config')
+        • For categorization: merchant rules must be created (run 'up-ynab-sync learn')
         
         The sync process:
         1. Loads your account mappings
         2. Fetches new transactions from each Up Banking account
         3. Checks for duplicates against local database
-        4. Creates corresponding transactions in YNAB
-        5. Records successful syncs to prevent future duplicates
+        4. Applies merchant categorization rules (if --categorize is enabled)
+        5. Creates corresponding transactions in YNAB
+        6. Records successful syncs to prevent future duplicates
         """
     )
     
@@ -49,6 +52,9 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
     
     @Flag(name: .long, help: "Fix incorrectly marked transactions in database")
     var fixDatabase: Bool = false
+    
+    @Flag(name: .long, help: "Enable merchant categorization using learned rules")
+    var categorize: Bool = false
     
     private var syncService: SyncService { SyncService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
@@ -86,7 +92,7 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
         // Handle retry operations
         if retryFailed {
             displayInfo("🔄 Retrying previously failed transactions...")
-            let syncOptions = SyncOptions(dryRun: dryRun, verbose: verbose)
+            let syncOptions = SyncOptions(dryRun: dryRun, verbose: verbose, enableCategorization: categorize)
             let result = try await syncService.retryFailedTransactions(options: syncOptions)
             try await displayResults(result: result)
             return
@@ -151,7 +157,8 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
             dateRange: dateRange,
             accountFilter: nil, // Use all configured accounts
             dryRun: dryRun,
-            verbose: verbose
+            verbose: verbose,
+            enableCategorization: categorize
         )
     }
     

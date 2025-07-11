@@ -104,13 +104,15 @@ struct SyncOptions {
     let accountFilter: [String]?
     let dryRun: Bool
     let verbose: Bool
+    let enableCategorization: Bool  // NEW: Enable merchant categorization
     
-    init(fullSync: Bool = false, dateRange: DateInterval? = nil, accountFilter: [String]? = nil, dryRun: Bool = false, verbose: Bool = false) {
+    init(fullSync: Bool = false, dateRange: DateInterval? = nil, accountFilter: [String]? = nil, dryRun: Bool = false, verbose: Bool = false, enableCategorization: Bool = false) {
         self.fullSync = fullSync
         self.dateRange = dateRange
         self.accountFilter = accountFilter
         self.dryRun = dryRun
         self.verbose = verbose
+        self.enableCategorization = enableCategorization
     }
     
     static let `default` = SyncOptions()

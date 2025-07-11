@@ -186,6 +186,25 @@ struct YNABTransactionRequest: Codable {
         }
     }
     
+    init(accountId: String, payeeName: String?, categoryId: String?, memo: String?, amount: Int, date: String, cleared: String, approved: Bool, flagColor: String?, importId: String? = nil) {
+        self.accountId = accountId
+        self.payeeName = payeeName
+        self.categoryId = categoryId
+        self.memo = memo
+        self.amount = amount
+        self.date = date
+        self.cleared = cleared
+        self.approved = approved
+        self.flagColor = flagColor
+        
+        // Validate and truncate import_id to YNAB's 36-character limit
+        if let importId = importId {
+            self.importId = YNABTransactionRequest.validateImportId(importId)
+        } else {
+            self.importId = nil
+        }
+    }
+    
     static func validateImportId(_ importId: String) -> String {
         // YNAB import_id has a maximum length of 36 characters
         if importId.count <= 36 {
@@ -454,5 +473,56 @@ extension YNABTransaction {
             date: dateString,
             importId: importId
         )
+    }
+    
+    static func fromUpTransaction(
+        _ upTransaction: UpTransaction,
+        accountId: String,
+        upAccountName: String,
+        merchantRule: MerchantRule?
+    ) -> YNABTransactionRequest {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        
+        let date = upTransaction.settledAt ?? upTransaction.createdAt
+        let dateString = dateFormatter.string(from: date)
+        
+        let memo = [
+            upTransaction.displayDescription,
+            upTransaction.message.map { "Note: \($0)" }
+        ].compactMap { $0 }.joined(separator: " | ")
+        
+        // Use merchant rule payee name if available, otherwise use transaction description
+        let payeeName = merchantRule?.payeeName ?? upTransaction.displayDescription
+        let amount = upTransaction.amount.toYNABAmount()
+        let importId = YNABTransactionRequest.validateImportId(upTransaction.id)
+        
+        // Create base request
+        var request = YNABTransactionRequest(
+            accountId: accountId,
+            payeeName: payeeName,
+            memo: memo.isEmpty ? nil : memo,
+            amount: amount,
+            date: dateString,
+            importId: importId
+        )
+        
+        // Apply merchant rule categorization if available
+        if let merchantRule = merchantRule {
+            request = YNABTransactionRequest(
+                accountId: accountId,
+                payeeName: merchantRule.payeeName,
+                categoryId: merchantRule.categoryId,
+                memo: memo.isEmpty ? nil : memo,
+                amount: amount,
+                date: dateString,
+                cleared: "uncleared",
+                approved: true,
+                flagColor: nil,
+                importId: importId
+            )
+        }
+        
+        return request
     }
 }
