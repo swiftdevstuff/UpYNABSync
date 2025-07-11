@@ -12,6 +12,11 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
         • Your Up Transaction Account to any YNAB account
         • Each Up Saver account to any YNAB account
         
+        Smart Categorization Setup:
+        • Run 'up-ynab-sync config --categorization' to enable automatic categorization
+        • Configure confidence thresholds and auto-apply settings
+        • Set up categorization preferences for future syncs
+        
         All mappings are saved locally and used for synchronization.
         
         Prerequisites:

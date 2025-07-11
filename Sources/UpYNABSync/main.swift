@@ -15,6 +15,17 @@ struct UpYNABSync: AsyncParsableCommand {
         3. Run 'up-ynab-sync sync' to perform your first sync
         4. Run 'up-ynab-sync install' to set up automatic daily syncing
         
+        Smart Categorization (Optional):
+        • Run 'up-ynab-sync learn' to create merchant categorization rules
+        • Run 'up-ynab-sync learn --from-ynab' to analyze existing YNAB patterns
+        • Run 'up-ynab-sync config --categorization' to enable auto-categorization
+        • Run 'up-ynab-sync rules' to manage your categorization rules
+        
+        Monitoring:
+        • Run 'up-ynab-sync status' to check system health and rule performance
+        • Run 'up-ynab-sync review' to handle failed transactions
+        • Run 'up-ynab-sync review --categorization' to review rule performance
+        
         For help with any command, use --help (e.g., 'up-ynab-sync sync --help')
         """,
         version: "1.0.0",
