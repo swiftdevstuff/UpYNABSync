@@ -44,7 +44,7 @@ struct SyncLogEntry {
 
 // MARK: - Merchant Learning Models
 
-struct MerchantRule {
+struct MerchantRule: Codable {
     let id: Int64?
     let merchantPattern: String
     let categoryId: String
@@ -55,6 +55,19 @@ struct MerchantRule {
     let lastUsed: String?
     let createdAt: String
     let updatedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case merchantPattern = "merchant_pattern"
+        case categoryId = "category_id"
+        case categoryName = "category_name"
+        case payeeName = "payee_name"
+        case confidence
+        case usageCount = "usage_count"
+        case lastUsed = "last_used"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
 }
 
 struct CategorizationHistory {
