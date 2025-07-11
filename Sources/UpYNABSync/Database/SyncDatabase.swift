@@ -119,7 +119,7 @@ class SyncDatabase: @unchecked Sendable {
     }
     
     private func migrateDatabase() throws {
-        guard let db = db else {
+        guard db != nil else {
             throw DatabaseError.connectionFailed
         }
         
