@@ -130,13 +130,17 @@ class SyncDatabase: @unchecked Sendable {
         
         do {
             let currentVersion = try getCurrentDatabaseVersion()
-            let targetVersion = 2
+            let targetVersion = 3
             
             if currentVersion < targetVersion {
                 logger.info("Migrating database from version \(currentVersion) to \(targetVersion)")
                 
                 if currentVersion < 2 {
                     try migrateToVersion2()
+                }
+                
+                if currentVersion < 3 {
+                    try migrateToVersion3()
                 }
                 
                 try setDatabaseVersion(targetVersion)
@@ -243,6 +247,38 @@ class SyncDatabase: @unchecked Sendable {
         }
     }
     
+    private func migrateToVersion3() throws {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            // Add budget_id column to synced_transactions table
+            try db.run("ALTER TABLE synced_transactions ADD COLUMN budget_id TEXT")
+            
+            // Add budget_id column to sync_log table
+            try db.run("ALTER TABLE sync_log ADD COLUMN budget_id TEXT")
+            
+            // Add budget_id column to merchant_rules table
+            try db.run("ALTER TABLE merchant_rules ADD COLUMN budget_id TEXT")
+            
+            // Add budget_id column to categorization_history table
+            try db.run("ALTER TABLE categorization_history ADD COLUMN budget_id TEXT")
+            
+            // For backward compatibility, populate existing records with "default" budget_id
+            // This ensures existing data continues to work after migration
+            try db.run("UPDATE synced_transactions SET budget_id = 'default' WHERE budget_id IS NULL")
+            try db.run("UPDATE sync_log SET budget_id = 'default' WHERE budget_id IS NULL")
+            try db.run("UPDATE merchant_rules SET budget_id = 'default' WHERE budget_id IS NULL")
+            try db.run("UPDATE categorization_history SET budget_id = 'default' WHERE budget_id IS NULL")
+            
+            logger.info("Successfully migrated database to version 3 - added multi-budget support")
+        } catch {
+            logger.error("Failed to migrate to version 3: \(error)")
+            throw DatabaseError.migrationFailed(error)
+        }
+    }
+    
     // MARK: - Synced Transactions
     
     func insertSyncedTransaction(_ transaction: SyncedTransaction) throws {
@@ -263,7 +299,8 @@ class SyncDatabase: @unchecked Sendable {
                 DatabaseTables.syncedYnabTransactionId <- transaction.ynabTransactionId,
                 DatabaseTables.syncedYnabAmount <- transaction.ynabAmount,
                 DatabaseTables.syncedSyncTimestamp <- transaction.syncTimestamp,
-                DatabaseTables.syncedStatus <- transaction.status
+                DatabaseTables.syncedStatus <- transaction.status,
+                DatabaseTables.syncedBudgetId <- transaction.budgetId
             ))
             
             logger.logDatabaseOperation("Inserted/Updated", table: "synced_transactions")
@@ -321,6 +358,24 @@ class SyncDatabase: @unchecked Sendable {
             return nil
         } catch {
             logger.error("Failed to get transaction status: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getTransactionStatus(_ transactionId: String, budgetId: String) throws -> String? {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            if let row = try db.pluck(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedTransactionId == transactionId)
+                .filter(DatabaseTables.syncedBudgetId == budgetId)) {
+                return row[DatabaseTables.syncedStatus]
+            }
+            return nil
+        } catch {
+            logger.error("Failed to get transaction status for budget \(budgetId): \(error)")
             throw DatabaseError.queryFailed(error)
         }
     }
@@ -544,7 +599,8 @@ class SyncDatabase: @unchecked Sendable {
                 DatabaseTables.logTransactionsSkipped <- entry.transactionsSkipped,
                 DatabaseTables.logTransactionsFailed <- entry.transactionsFailed,
                 DatabaseTables.logErrors <- entry.errors,
-                DatabaseTables.logSyncDurationSeconds <- entry.syncDurationSeconds
+                DatabaseTables.logSyncDurationSeconds <- entry.syncDurationSeconds,
+                DatabaseTables.logBudgetId <- entry.budgetId
             ))
             
             logger.logDatabaseOperation("Inserted", table: "sync_log")
@@ -691,7 +747,8 @@ class SyncDatabase: @unchecked Sendable {
                 DatabaseTables.merchantRuleUsageCount <- rule.usageCount,
                 DatabaseTables.merchantRuleLastUsed <- rule.lastUsed,
                 DatabaseTables.merchantRuleCreatedAt <- rule.createdAt,
-                DatabaseTables.merchantRuleUpdatedAt <- rule.updatedAt
+                DatabaseTables.merchantRuleUpdatedAt <- rule.updatedAt,
+                DatabaseTables.merchantRuleBudgetId <- rule.budgetId
             ))
             
             logger.logDatabaseOperation("Inserted/Updated", table: "merchant_rules")
@@ -793,7 +850,8 @@ class SyncDatabase: @unchecked Sendable {
                 DatabaseTables.historyAppliedCategoryId <- history.appliedCategoryId,
                 DatabaseTables.historyUserAccepted <- history.userAccepted,
                 DatabaseTables.historyConfidence <- history.confidence,
-                DatabaseTables.historyCreatedAt <- history.createdAt
+                DatabaseTables.historyCreatedAt <- history.createdAt,
+                DatabaseTables.historyBudgetId <- history.budgetId
             ))
             
             logger.logDatabaseOperation("Inserted", table: "categorization_history")
@@ -839,6 +897,185 @@ class SyncDatabase: @unchecked Sendable {
             ]
         } catch {
             logger.error("Failed to get merchant rule stats: \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    // MARK: - Budget-Aware Database Operations
+    
+    func isTransactionSynced(_ transactionId: String, budgetId: String) throws -> Bool {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let count = try db.scalar(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedTransactionId == transactionId)
+                .filter(DatabaseTables.syncedStatus == "synced")
+                .filter(DatabaseTables.syncedBudgetId == budgetId)
+                .count)
+            return count > 0
+        } catch {
+            logger.error("Failed to check if transaction is synced for budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getFailedTransactions(budgetId: String, limit: Int = 50) throws -> [SyncedTransaction] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rows = try db.prepare(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedStatus == "failed")
+                .filter(DatabaseTables.syncedBudgetId == budgetId)
+                .order(DatabaseTables.syncedSyncTimestamp.desc)
+                .limit(limit))
+            
+            return rows.map { $0.toSyncedTransaction() }
+        } catch {
+            logger.error("Failed to get failed transactions for budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getSyncedTransactionsForAccount(_ upAccountId: String, budgetId: String, limit: Int = 100) throws -> [SyncedTransaction] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rows = try db.prepare(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedUpAccountId == upAccountId)
+                .filter(DatabaseTables.syncedBudgetId == budgetId)
+                .order(DatabaseTables.syncedSyncTimestamp.desc)
+                .limit(limit))
+            
+            return rows.map { $0.toSyncedTransaction() }
+        } catch {
+            logger.error("Failed to get synced transactions for account \(upAccountId) in budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getLastSyncLogEntry(budgetId: String) throws -> SyncLogEntry? {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            if let row = try db.pluck(DatabaseTables.syncLog
+                .filter(DatabaseTables.logBudgetId == budgetId)
+                .order(DatabaseTables.logSyncDate.desc)
+                .limit(1)) {
+                return row.toSyncLogEntry()
+            }
+            return nil
+        } catch {
+            logger.error("Failed to get last sync log entry for budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getSyncLogEntries(budgetId: String, limit: Int = 10) throws -> [SyncLogEntry] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rows = try db.prepare(DatabaseTables.syncLog
+                .filter(DatabaseTables.logBudgetId == budgetId)
+                .order(DatabaseTables.logSyncDate.desc)
+                .limit(limit))
+            
+            return rows.map { $0.toSyncLogEntry() }
+        } catch {
+            logger.error("Failed to get sync log entries for budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    
+    func getAllMerchantRules(budgetId: String) throws -> [MerchantRule] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rows = try db.prepare(DatabaseTables.merchantRules
+                .filter(DatabaseTables.merchantRuleBudgetId == budgetId)
+                .order(DatabaseTables.merchantRuleUsageCount.desc))
+            
+            return rows.map { $0.toMerchantRule() }
+        } catch {
+            logger.error("Failed to get all merchant rules for budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getMerchantRule(_ pattern: String, budgetId: String) throws -> MerchantRule? {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            if let row = try db.pluck(DatabaseTables.merchantRules
+                .filter(DatabaseTables.merchantRulePattern == pattern)
+                .filter(DatabaseTables.merchantRuleBudgetId == budgetId)) {
+                return row.toMerchantRule()
+            }
+            return nil
+        } catch {
+            logger.error("Failed to get merchant rule for pattern \(pattern) in budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    
+    
+    func getCategorizationHistory(budgetId: String, limit: Int = 100) throws -> [CategorizationHistory] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let rows = try db.prepare(DatabaseTables.categorizationHistory
+                .filter(DatabaseTables.historyBudgetId == budgetId)
+                .order(DatabaseTables.historyCreatedAt.desc)
+                .limit(limit))
+            
+            return rows.map { $0.toCategorizationHistory() }
+        } catch {
+            logger.error("Failed to get categorization history for budget \(budgetId): \(error)")
+            throw DatabaseError.queryFailed(error)
+        }
+    }
+    
+    func getDatabaseStats(budgetId: String) throws -> [String: Any] {
+        guard let db = db else {
+            throw DatabaseError.connectionFailed
+        }
+        
+        do {
+            let transactionCount = try db.scalar(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedBudgetId == budgetId).count)
+            let logCount = try db.scalar(DatabaseTables.syncLog
+                .filter(DatabaseTables.logBudgetId == budgetId).count)
+            let failedCount = try db.scalar(DatabaseTables.syncedTransactions
+                .filter(DatabaseTables.syncedStatus == "failed")
+                .filter(DatabaseTables.syncedBudgetId == budgetId).count)
+            let rulesCount = try db.scalar(DatabaseTables.merchantRules
+                .filter(DatabaseTables.merchantRuleBudgetId == budgetId).count)
+            
+            return [
+                "total_transactions": transactionCount,
+                "sync_logs": logCount,
+                "failed_transactions": failedCount,
+                "merchant_rules": rulesCount
+            ]
+        } catch {
+            logger.error("Failed to get database stats for budget \(budgetId): \(error)")
             throw DatabaseError.queryFailed(error)
         }
     }

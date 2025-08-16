@@ -50,9 +50,24 @@ struct RulesCommand: AsyncParsableCommand, BaseCommand {
     @Flag(name: .long, help: "Force operations without confirmation")
     var force: Bool = false
     
+    @Option(name: .long, help: "Specify budget profile for rules (defaults to active profile)")
+    var budget: String?
+    
     private var merchantLearningService: MerchantLearningService { MerchantLearningService.shared }
     private var ynabService: YNABService { YNABService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
+    
+    // MARK: - Budget Profile Helper
+    
+    private func getBudgetId() throws -> String {
+        if let budgetName = budget {
+            let profile = try configManager.getProfile(budgetName)
+            return profile.ynabBudgetId
+        } else {
+            let activeProfile = try configManager.getActiveProfile()
+            return activeProfile.ynabBudgetId
+        }
+    }
     
     func run() async throws {
         // Check if any action is specified
@@ -261,12 +276,14 @@ struct RulesCommand: AsyncParsableCommand, BaseCommand {
             }
             
             // Create the rule
+            let budgetId = try getBudgetId()
             try merchantLearningService.createMerchantRule(
                 pattern: pattern.uppercased(),
                 categoryId: selectedCategory.id,
                 categoryName: selectedCategory.displayName,
                 payeeName: payeeName,
-                confidence: 1.0
+                confidence: 1.0,
+                budgetId: budgetId
             )
             
             displaySuccess("Rule created successfully!")
@@ -378,6 +395,7 @@ struct RulesCommand: AsyncParsableCommand, BaseCommand {
             }
             
             var imported = 0
+            let budgetId = try getBudgetId()
             for rule in rules {
                 do {
                     try merchantLearningService.createMerchantRule(
@@ -385,7 +403,8 @@ struct RulesCommand: AsyncParsableCommand, BaseCommand {
                         categoryId: rule.categoryId,
                         categoryName: rule.categoryName,
                         payeeName: rule.payeeName,
-                        confidence: rule.confidence
+                        confidence: rule.confidence,
+                        budgetId: budgetId
                     )
                     imported += 1
                 } catch {

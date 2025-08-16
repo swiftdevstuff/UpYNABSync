@@ -39,7 +39,7 @@ class SyncService: @unchecked Sendable {
     
     // MARK: - Main Sync Operations
     
-    func syncTransactions(options: SyncOptions = .default) async throws -> SyncResult {
+    func syncTransactions(options: SyncOptions = .default, budgetId: String? = nil) async throws -> SyncResult {
         logger.info("🔄 Starting sync operation")
         let startTime = Date()
         
@@ -47,7 +47,7 @@ class SyncService: @unchecked Sendable {
         try await initializeDatabaseIfNeeded()
         
         // Load configuration
-        let configuration = try loadConfiguration()
+        let configuration = try loadConfiguration(budgetId: budgetId)
         
         // Determine date range
         let dateRange = try determineDateRange(options: options)
@@ -111,7 +111,7 @@ class SyncService: @unchecked Sendable {
             errors: allErrors
         )
         
-        try await logSyncOperation(result: syncResult, dateRange: dateRange)
+        try await logSyncOperation(result: syncResult, dateRange: dateRange, budgetId: configuration.ynabBudgetId)
         
         logger.logSyncComplete(summary: summary.displaySummary)
         
@@ -135,7 +135,7 @@ class SyncService: @unchecked Sendable {
             logger.info("📥 Found \(upTransactions.count) Up Banking transactions")
             
             // Filter out already synced transactions
-            let newTransactions = try await filterAlreadySyncedTransactions(upTransactions)
+            let newTransactions = try await filterAlreadySyncedTransactions(upTransactions, budgetId: budgetId)
             logger.info("🆕 \(newTransactions.count) new transactions to sync")
             
             if newTransactions.isEmpty {
@@ -244,7 +244,8 @@ class SyncService: @unchecked Sendable {
             upTransaction: transaction,
             ynabTransaction: nil,
             mapping: mapping,
-            status: .pending
+            status: .pending,
+            budgetId: budgetId
         )
         
         do {
@@ -277,7 +278,8 @@ class SyncService: @unchecked Sendable {
                 upTransaction: transaction,
                 ynabTransaction: ynabTransaction,
                 mapping: mapping,
-                status: .synced
+                status: .synced,
+                budgetId: budgetId
             )
             
             if let rule = merchantRule {
@@ -310,7 +312,8 @@ class SyncService: @unchecked Sendable {
                 upTransaction: transaction,
                 ynabTransaction: nil,
                 mapping: mapping,
-                status: .failed
+                status: .failed,
+                budgetId: budgetId
             )
             
             logger.error("❌ Failed to sync transaction \(transaction.id): \(error)")
@@ -337,11 +340,11 @@ class SyncService: @unchecked Sendable {
         }
     }
     
-    private func filterAlreadySyncedTransactions(_ transactions: [UpTransaction]) async throws -> [UpTransaction] {
+    private func filterAlreadySyncedTransactions(_ transactions: [UpTransaction], budgetId: String) async throws -> [UpTransaction] {
         var newTransactions: [UpTransaction] = []
         
         for transaction in transactions {
-            let status = try database.getTransactionStatus(transaction.id)
+            let status = try database.getTransactionStatus(transaction.id, budgetId: budgetId)
             
             switch status {
             case nil, "pending", "failed":
@@ -367,7 +370,7 @@ class SyncService: @unchecked Sendable {
         return newTransactions
     }
     
-    private func saveSyncedTransaction(upTransaction: UpTransaction, ynabTransaction: YNABTransaction?, mapping: SyncAccountMapping, status: SyncTransactionStatus) async throws {
+    private func saveSyncedTransaction(upTransaction: UpTransaction, ynabTransaction: YNABTransaction?, mapping: SyncAccountMapping, status: SyncTransactionStatus, budgetId: String) async throws {
         let syncTimestamp = ISO8601DateFormatter().string(from: Date())
         
         let syncedTransaction = SyncedTransaction(
@@ -382,13 +385,14 @@ class SyncService: @unchecked Sendable {
             ynabTransactionId: ynabTransaction?.id,
             ynabAmount: upTransaction.amount.toYNABAmount(),
             syncTimestamp: syncTimestamp,
-            status: status.rawValue
+            status: status.rawValue,
+            budgetId: budgetId
         )
         
         try database.insertSyncedTransaction(syncedTransaction)
     }
     
-    private func logSyncOperation(result: SyncResult, dateRange: DateInterval) async throws {
+    private func logSyncOperation(result: SyncResult, dateRange: DateInterval, budgetId: String) async throws {
         let syncLogEntry = SyncLogEntry(
             id: nil,
             syncDate: ISO8601DateFormatter().string(from: Date()),
@@ -400,7 +404,8 @@ class SyncService: @unchecked Sendable {
             transactionsSkipped: result.summary.skippedTransactions,
             transactionsFailed: result.summary.failedTransactions,
             errors: result.errors.isEmpty ? nil : result.errors.map { $0.displayMessage }.joined(separator: "; "),
-            syncDurationSeconds: result.summary.duration
+            syncDurationSeconds: result.summary.duration,
+            budgetId: budgetId
         )
         
         try database.insertSyncLogEntry(syncLogEntry)
@@ -408,27 +413,34 @@ class SyncService: @unchecked Sendable {
     
     // MARK: - Configuration Management
     
-    private func loadConfiguration() throws -> SyncConfiguration {
-        guard configManager.hasConfiguration() else {
-            throw SyncServiceError.configurationMissing
+    private func loadConfiguration(budgetId: String? = nil) throws -> SyncConfiguration {
+        let profile: BudgetProfile
+        
+        if let budgetId = budgetId {
+            // Use specific budget profile
+            profile = try configManager.getProfile(budgetId)
+        } else {
+            // Use active budget profile
+            guard configManager.hasAnyConfiguration() else {
+                throw SyncServiceError.configurationMissing
+            }
+            profile = try configManager.getActiveProfile()
         }
         
-        let config = try configManager.loadConfiguration()
-        
-        let accountMappings = config.accountMappings.map { configMapping in
+        let accountMappings = profile.accountMappings.map { budgetMapping in
             SyncAccountMapping(
-                upAccountId: configMapping.upAccountId,
-                upAccountName: configMapping.upAccountName,
-                upAccountType: configMapping.upAccountType,
-                ynabAccountId: configMapping.ynabAccountId,
-                ynabAccountName: configMapping.ynabAccountName,
+                upAccountId: budgetMapping.upAccountId,
+                upAccountName: budgetMapping.upAccountName,
+                upAccountType: budgetMapping.upAccountType,
+                ynabAccountId: budgetMapping.ynabAccountId,
+                ynabAccountName: budgetMapping.ynabAccountName,
                 enabled: true,
                 lastSyncDate: nil
             )
         }
         
         return SyncConfiguration(
-            ynabBudgetId: config.ynabBudgetId,
+            ynabBudgetId: profile.ynabBudgetId,
             accountMappings: accountMappings,
             lastSyncDate: nil,
             syncSettings: .default
@@ -542,7 +554,7 @@ class SyncService: @unchecked Sendable {
         return failedTransactions
     }
     
-    func retryFailedTransactions(options: SyncOptions = .default) async throws -> SyncResult {
+    func retryFailedTransactions(options: SyncOptions = .default, budgetId: String? = nil) async throws -> SyncResult {
         logger.info("🔄 Starting retry of failed transactions")
         
         // Get failed transactions
@@ -557,7 +569,7 @@ class SyncService: @unchecked Sendable {
         let transactionsByAccount = Dictionary(grouping: failedTransactions) { $0.upAccountId }
         
         // Load configuration to get account mappings
-        let configuration = try loadConfiguration()
+        let configuration = try loadConfiguration(budgetId: budgetId)
         
         for (upAccountId, transactions) in transactionsByAccount {
             guard let mapping = configuration.accountMappings.first(where: { $0.upAccountId == upAccountId }) else {
@@ -575,18 +587,40 @@ class SyncService: @unchecked Sendable {
         }
         
         // Now run a normal sync which will pick up these "new" transactions
-        return try await syncTransactions(options: options)
+        return try await syncTransactions(options: options, budgetId: budgetId)
     }
     
     // MARK: - Status and Health
     
-    func getSyncStatus() async throws -> SyncStatus {
+    func getSyncStatus(budgetId: String? = nil) async throws -> SyncStatus {
+        // Determine which budget profile to use
+        let profile: BudgetProfile
+        
+        if let budgetId = budgetId {
+            profile = try configManager.getProfile(budgetId)
+        } else {
+            guard configManager.hasAnyConfiguration() else {
+                // Return basic status when no configuration exists
+                return SyncStatus(
+                    isConfigured: false,
+                    hasValidTokens: KeychainManager.shared.hasAllTokens(),
+                    lastSyncDate: nil,
+                    lastSyncStatus: nil,
+                    nextScheduledSync: nil,
+                    accountStatuses: [],
+                    launchAgentStatus: LaunchAgentStatus(isInstalled: false, isLoaded: false, nextRunTime: nil, lastRunTime: nil, lastRunStatus: nil),
+                    databaseHealth: DatabaseHealth(isAccessible: true, totalRecords: 0, failedTransactions: 0, oldestRecord: nil, lastCleanup: nil, integrityCheck: true)
+                )
+            }
+            profile = try configManager.getActiveProfile()
+        }
+        
         // Check configuration
-        let isConfigured = configManager.hasConfiguration()
+        let isConfigured = !profile.accountMappings.isEmpty
         let hasValidTokens = KeychainManager.shared.hasAllTokens()
         
-        // Get last sync info
-        let lastSyncEntry = try database.getLastSyncLogEntry()
+        // Get last sync info for this budget
+        let lastSyncEntry = try database.getLastSyncLogEntry(budgetId: profile.ynabBudgetId)
         let lastSyncDate = lastSyncEntry?.syncDate.upBankingAPIDate()
         let lastSyncStatus: SyncTransactionStatus? = lastSyncEntry?.transactionsFailed ?? 0 > 0 ? .failed : .synced
         
@@ -594,9 +628,9 @@ class SyncService: @unchecked Sendable {
         var accountStatuses: [AccountStatus] = []
         if isConfigured {
             do {
-                let config = try configManager.loadConfiguration()
-                for mapping in config.accountMappings {
-                    let accountStatus = try await getAccountStatus(mapping: mapping, budgetId: config.ynabBudgetId)
+                for mapping in profile.accountMappings {
+                    let legacyMapping = mapping.toLegacyAccountMapping()
+                    let accountStatus = try await getAccountStatus(mapping: legacyMapping, budgetId: profile.ynabBudgetId)
                     accountStatuses.append(accountStatus)
                 }
             } catch {
@@ -615,7 +649,7 @@ class SyncService: @unchecked Sendable {
         )
         
         // Get database health
-        let databaseHealth = try await getDatabaseHealth()
+        let databaseHealth = try await getDatabaseHealth(budgetId: profile.ynabBudgetId)
         
         return SyncStatus(
             isConfigured: isConfigured,
@@ -648,10 +682,10 @@ class SyncService: @unchecked Sendable {
         let ynabBalanceDouble = ynabBalance.map { Double($0) / 1000.0 }
         
         // Get recent transactions
-        let recentTransactions = try database.getSyncedTransactionsForAccount(mapping.upAccountId, limit: 50)
+        let recentTransactions = try database.getSyncedTransactionsForAccount(mapping.upAccountId, budgetId: budgetId, limit: 50)
         
         // Get recent errors
-        let recentErrors = try database.getFailedTransactions(limit: 10)
+        let recentErrors = try database.getFailedTransactions(budgetId: budgetId, limit: 10)
             .filter { $0.upAccountId == mapping.upAccountId }
             .map { transaction in
                 SyncError(
@@ -672,8 +706,8 @@ class SyncService: @unchecked Sendable {
         )
     }
     
-    private func getDatabaseHealth() async throws -> DatabaseHealth {
-        let stats = try database.getDatabaseStats()
+    private func getDatabaseHealth(budgetId: String) async throws -> DatabaseHealth {
+        let stats = try database.getDatabaseStats(budgetId: budgetId)
         let totalRecords = stats["total_transactions"] as? Int ?? 0
         let failedTransactions = stats["failed_transactions"] as? Int ?? 0
         let integrityCheck = try database.validateDatabaseIntegrity()

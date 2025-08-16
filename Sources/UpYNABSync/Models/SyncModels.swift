@@ -1,5 +1,242 @@
 import Foundation
 
+// MARK: - Multi-Budget Configuration Models
+
+struct BudgetProfile: Codable, Identifiable {
+    let id: String
+    let ynabBudgetId: String
+    let ynabBudgetName: String
+    let accountMappings: [BudgetAccountMapping]
+    let categorizationSettings: BudgetCategorizationSettings?
+    let createdAt: Date
+    let updatedAt: Date
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case ynabBudgetId = "ynab_budget_id"
+        case ynabBudgetName = "ynab_budget_name"
+        case accountMappings = "account_mappings"
+        case categorizationSettings = "categorization_settings"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+    
+    var displayName: String {
+        return ynabBudgetName.isEmpty ? ynabBudgetId : ynabBudgetName
+    }
+    
+    var isActive: Bool {
+        return !accountMappings.isEmpty
+    }
+    
+    init(id: String, ynabBudgetId: String, ynabBudgetName: String, accountMappings: [BudgetAccountMapping] = [], categorizationSettings: BudgetCategorizationSettings? = nil) {
+        self.id = id
+        self.ynabBudgetId = ynabBudgetId
+        self.ynabBudgetName = ynabBudgetName
+        self.accountMappings = accountMappings
+        self.categorizationSettings = categorizationSettings
+        self.createdAt = Date()
+        self.updatedAt = Date()
+    }
+    
+    // Create from legacy ConfigManager.Configuration for migration
+    static func fromLegacyConfiguration(_ legacyConfig: ConfigManager.Configuration, budgetName: String = "") -> BudgetProfile {
+        let budgetMappings = legacyConfig.accountMappings.map { legacyMapping in
+            BudgetAccountMapping(
+                upAccountId: legacyMapping.upAccountId,
+                upAccountName: legacyMapping.upAccountName,
+                upAccountType: legacyMapping.upAccountType,
+                ynabAccountId: legacyMapping.ynabAccountId,
+                ynabAccountName: legacyMapping.ynabAccountName
+            )
+        }
+        
+        let budgetCategorizationSettings = legacyConfig.categorizationSettings.map { legacySettings in
+            BudgetCategorizationSettings(
+                enabled: legacySettings.enabled,
+                autoApplyDuringSync: legacySettings.autoApplyDuringSync,
+                minConfidenceThreshold: legacySettings.minConfidenceThreshold,
+                suggestNewRules: legacySettings.suggestNewRules
+            )
+        }
+        
+        return BudgetProfile(
+            id: "default",
+            ynabBudgetId: legacyConfig.ynabBudgetId,
+            ynabBudgetName: budgetName,
+            accountMappings: budgetMappings,
+            categorizationSettings: budgetCategorizationSettings
+        )
+    }
+}
+
+struct BudgetAccountMapping: Codable {
+    let upAccountId: String
+    let upAccountName: String
+    let upAccountType: String
+    let ynabAccountId: String
+    let ynabAccountName: String
+    
+    enum CodingKeys: String, CodingKey {
+        case upAccountId = "up_account_id"
+        case upAccountName = "up_account_name"
+        case upAccountType = "up_account_type"
+        case ynabAccountId = "ynab_account_id"
+        case ynabAccountName = "ynab_account_name"
+    }
+    
+    var displayName: String {
+        return "\(upAccountName) → \(ynabAccountName)"
+    }
+    
+    var isTransactionAccount: Bool {
+        return upAccountType.lowercased() == "transactional"
+    }
+    
+    var isSaverAccount: Bool {
+        return upAccountType.lowercased() == "saver"
+    }
+    
+    // Convert to legacy ConfigManager.AccountMapping for compatibility
+    func toLegacyAccountMapping() -> ConfigManager.AccountMapping {
+        return ConfigManager.AccountMapping(
+            upAccountId: upAccountId,
+            upAccountName: upAccountName,
+            upAccountType: upAccountType,
+            ynabAccountId: ynabAccountId,
+            ynabAccountName: ynabAccountName
+        )
+    }
+}
+
+struct BudgetCategorizationSettings: Codable {
+    let enabled: Bool
+    let autoApplyDuringSync: Bool
+    let minConfidenceThreshold: Double
+    let suggestNewRules: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case autoApplyDuringSync = "auto_apply_during_sync"
+        case minConfidenceThreshold = "min_confidence_threshold"
+        case suggestNewRules = "suggest_new_rules"
+    }
+    
+    static let `default` = BudgetCategorizationSettings(
+        enabled: false,
+        autoApplyDuringSync: false,
+        minConfidenceThreshold: 0.7,
+        suggestNewRules: true
+    )
+    
+    // Convert to legacy ConfigManager.CategorizationSettings for compatibility
+    func toLegacyCategorizationSettings() -> ConfigManager.CategorizationSettings {
+        return ConfigManager.CategorizationSettings(
+            enabled: enabled,
+            autoApplyDuringSync: autoApplyDuringSync,
+            minConfidenceThreshold: minConfidenceThreshold,
+            suggestNewRules: suggestNewRules
+        )
+    }
+}
+
+struct MultiBudgetConfiguration: Codable {
+    let version: String
+    var activeProfile: String
+    var profiles: [String: BudgetProfile]
+    let createdAt: Date
+    let updatedAt: Date
+    
+    enum CodingKeys: String, CodingKey {
+        case version
+        case activeProfile = "active_profile"
+        case profiles
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+    
+    static let currentVersion = "2.0"
+    
+    init(activeProfile: String, profiles: [String: BudgetProfile]) {
+        self.version = Self.currentVersion
+        self.activeProfile = activeProfile
+        self.profiles = profiles
+        self.createdAt = Date()
+        self.updatedAt = Date()
+    }
+    
+    func getActiveProfile() -> BudgetProfile? {
+        return profiles[activeProfile]
+    }
+    
+    func getAllProfiles() -> [BudgetProfile] {
+        return Array(profiles.values).sorted { $0.displayName < $1.displayName }
+    }
+    
+    func hasProfile(_ profileId: String) -> Bool {
+        return profiles[profileId] != nil
+    }
+    
+    mutating func setActiveProfile(_ profileId: String) throws {
+        guard hasProfile(profileId) else {
+            throw ConfigError.profileNotFound(profileId)
+        }
+        activeProfile = profileId
+    }
+    
+    mutating func addProfile(_ profile: BudgetProfile) throws {
+        guard !hasProfile(profile.id) else {
+            throw ConfigError.profileAlreadyExists(profile.id)
+        }
+        profiles[profile.id] = profile
+    }
+    
+    mutating func updateProfile(_ profile: BudgetProfile) throws {
+        guard hasProfile(profile.id) else {
+            throw ConfigError.profileNotFound(profile.id)
+        }
+        profiles[profile.id] = profile
+    }
+    
+    mutating func removeProfile(_ profileId: String) throws {
+        guard hasProfile(profileId) else {
+            throw ConfigError.profileNotFound(profileId)
+        }
+        
+        guard profileId != activeProfile else {
+            throw ConfigError.cannotDeleteActiveProfile(profileId)
+        }
+        
+        profiles.removeValue(forKey: profileId)
+    }
+}
+
+enum ConfigError: Error, LocalizedError {
+    case profileNotFound(String)
+    case profileAlreadyExists(String)
+    case cannotDeleteActiveProfile(String)
+    case noActiveProfile
+    case invalidConfiguration
+    case migrationFailed(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .profileNotFound(let profileId):
+            return "Budget profile '\(profileId)' not found"
+        case .profileAlreadyExists(let profileId):
+            return "Budget profile '\(profileId)' already exists"
+        case .cannotDeleteActiveProfile(let profileId):
+            return "Cannot delete active budget profile '\(profileId)'. Switch to another profile first."
+        case .noActiveProfile:
+            return "No active budget profile configured"
+        case .invalidConfiguration:
+            return "Invalid configuration format"
+        case .migrationFailed(let reason):
+            return "Configuration migration failed: \(reason)"
+        }
+    }
+}
+
 // MARK: - Sync Configuration Models
 
 struct SyncConfiguration: Codable {

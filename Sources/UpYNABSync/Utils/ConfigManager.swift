@@ -11,6 +11,10 @@ class ConfigManager: @unchecked Sendable {
         .appendingPathComponent(".up-ynab-sync")
         .appendingPathComponent("config.json")
     
+    private let multiBudgetConfigFilePath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".up-ynab-sync")
+        .appendingPathComponent("multi-budget-config.json")
+    
     struct Configuration: Codable {
         let ynabBudgetId: String
         let accountMappings: [AccountMapping]
@@ -66,6 +70,11 @@ class ConfigManager: @unchecked Sendable {
         case fileSystemError(Error)
         case encodingError(Error)
         case decodingError(Error)
+        case profileNotFound(String)
+        case profileAlreadyExists(String)
+        case cannotDeleteActiveProfile(String)
+        case noActiveProfile
+        case migrationFailed(String)
         
         var errorDescription: String? {
             switch self {
@@ -79,6 +88,16 @@ class ConfigManager: @unchecked Sendable {
                 return "Failed to encode configuration: \(error.localizedDescription)"
             case .decodingError(let error):
                 return "Failed to decode configuration: \(error.localizedDescription)"
+            case .profileNotFound(let profileId):
+                return "Budget profile '\(profileId)' not found"
+            case .profileAlreadyExists(let profileId):
+                return "Budget profile '\(profileId)' already exists"
+            case .cannotDeleteActiveProfile(let profileId):
+                return "Cannot delete active budget profile '\(profileId)'. Switch to another profile first."
+            case .noActiveProfile:
+                return "No active budget profile configured"
+            case .migrationFailed(let reason):
+                return "Configuration migration failed: \(reason)"
             }
         }
     }
@@ -249,6 +268,252 @@ class ConfigManager: @unchecked Sendable {
     func getCategorizationSettings() throws -> CategorizationSettings {
         let config = try loadConfiguration()
         return config.categorizationSettings ?? .default
+    }
+    
+    // MARK: - Multi-Budget Configuration Support
+    
+    func hasMultiBudgetConfiguration() -> Bool {
+        return FileManager.default.fileExists(atPath: multiBudgetConfigFilePath.path)
+    }
+    
+    func loadMultiBudgetConfiguration() throws -> MultiBudgetConfiguration {
+        guard FileManager.default.fileExists(atPath: multiBudgetConfigFilePath.path) else {
+            throw ConfigError.configurationNotFound
+        }
+        
+        do {
+            let data = try Data(contentsOf: multiBudgetConfigFilePath)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(MultiBudgetConfiguration.self, from: data)
+        } catch let error as DecodingError {
+            throw ConfigError.decodingError(error)
+        } catch {
+            throw ConfigError.fileSystemError(error)
+        }
+    }
+    
+    func saveMultiBudgetConfiguration(_ configuration: MultiBudgetConfiguration) throws {
+        try ensureConfigDirectory()
+        
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(configuration)
+            try data.write(to: multiBudgetConfigFilePath)
+        } catch let error as EncodingError {
+            throw ConfigError.encodingError(error)
+        } catch {
+            throw ConfigError.fileSystemError(error)
+        }
+    }
+    
+    func migrateToMultiBudgetConfiguration() throws -> MultiBudgetConfiguration {
+        // Check if already migrated
+        if hasMultiBudgetConfiguration() {
+            return try loadMultiBudgetConfiguration()
+        }
+        
+        // Check if there's a legacy configuration to migrate
+        guard hasConfiguration() else {
+            // No legacy configuration, create empty multi-budget config
+            let emptyConfig = MultiBudgetConfiguration(activeProfile: "", profiles: [:])
+            try saveMultiBudgetConfiguration(emptyConfig)
+            return emptyConfig
+        }
+        
+        // Load legacy configuration
+        let legacyConfig = try loadConfiguration()
+        
+        // Create default profile from legacy configuration (budget name will be empty initially)
+        let defaultProfile = BudgetProfile.fromLegacyConfiguration(legacyConfig, budgetName: "Default Budget")
+        
+        // Create multi-budget configuration with default profile
+        let multiBudgetConfig = MultiBudgetConfiguration(
+            activeProfile: "default",
+            profiles: ["default": defaultProfile]
+        )
+        
+        // Save the new configuration
+        try saveMultiBudgetConfiguration(multiBudgetConfig)
+        
+        // Backup the legacy configuration
+        let backupPath = configDirectoryPath.appendingPathComponent("config-legacy-backup.json")
+        try? FileManager.default.copyItem(at: configFilePath, to: backupPath)
+        
+        return multiBudgetConfig
+    }
+    
+    func migrateToMultiBudgetConfigurationAsync() async throws -> MultiBudgetConfiguration {
+        // Check if already migrated
+        if hasMultiBudgetConfiguration() {
+            return try loadMultiBudgetConfiguration()
+        }
+        
+        // Check if there's a legacy configuration to migrate
+        guard hasConfiguration() else {
+            // No legacy configuration, create empty multi-budget config
+            let emptyConfig = MultiBudgetConfiguration(activeProfile: "", profiles: [:])
+            try saveMultiBudgetConfiguration(emptyConfig)
+            return emptyConfig
+        }
+        
+        // Load legacy configuration
+        let legacyConfig = try loadConfiguration()
+        
+        // Get budget name from YNAB if possible
+        var budgetName = "Default Budget"
+        do {
+            budgetName = try await YNABService.shared.getBudgetName(budgetId: legacyConfig.ynabBudgetId)
+        } catch {
+            // If we can't get the budget name, use a default name
+            budgetName = "Default Budget"
+        }
+        
+        // Create default profile from legacy configuration
+        let defaultProfile = BudgetProfile.fromLegacyConfiguration(legacyConfig, budgetName: budgetName)
+        
+        // Create multi-budget configuration with default profile
+        let multiBudgetConfig = MultiBudgetConfiguration(
+            activeProfile: "default",
+            profiles: ["default": defaultProfile]
+        )
+        
+        // Save the new configuration
+        try saveMultiBudgetConfiguration(multiBudgetConfig)
+        
+        // Backup the legacy configuration
+        let backupPath = configDirectoryPath.appendingPathComponent("config-legacy-backup.json")
+        try? FileManager.default.copyItem(at: configFilePath, to: backupPath)
+        
+        return multiBudgetConfig
+    }
+    
+    func getActiveProfile() throws -> BudgetProfile {
+        let config = try getOrMigrateConfiguration()
+        
+        guard let activeProfile = config.getActiveProfile() else {
+            throw ConfigError.noActiveProfile
+        }
+        
+        return activeProfile
+    }
+    
+    func setActiveProfile(_ profileId: String) throws {
+        var config = try getOrMigrateConfiguration()
+        try config.setActiveProfile(profileId)
+        try saveMultiBudgetConfiguration(config)
+    }
+    
+    func getAllProfiles() throws -> [BudgetProfile] {
+        let config = try getOrMigrateConfiguration()
+        return config.getAllProfiles()
+    }
+    
+    func getProfile(_ profileId: String) throws -> BudgetProfile {
+        let config = try getOrMigrateConfiguration()
+        
+        guard let profile = config.profiles[profileId] else {
+            throw ConfigError.profileNotFound(profileId)
+        }
+        
+        return profile
+    }
+    
+    func addProfile(_ profile: BudgetProfile) throws {
+        var config = try getOrMigrateConfiguration()
+        try config.addProfile(profile)
+        try saveMultiBudgetConfiguration(config)
+    }
+    
+    func updateProfile(_ profile: BudgetProfile) throws {
+        var config = try getOrMigrateConfiguration()
+        try config.updateProfile(profile)
+        try saveMultiBudgetConfiguration(config)
+    }
+    
+    func removeProfile(_ profileId: String) throws {
+        var config = try getOrMigrateConfiguration()
+        try config.removeProfile(profileId)
+        try saveMultiBudgetConfiguration(config)
+    }
+    
+    func hasAnyConfiguration() -> Bool {
+        return hasConfiguration() || hasMultiBudgetConfiguration()
+    }
+    
+    private func getOrMigrateConfiguration() throws -> MultiBudgetConfiguration {
+        if hasMultiBudgetConfiguration() {
+            return try loadMultiBudgetConfiguration()
+        } else {
+            return try migrateToMultiBudgetConfiguration()
+        }
+    }
+    
+    // MARK: - Backward Compatibility Methods
+    
+    // These methods provide backward compatibility by operating on the active profile
+    func getActiveBudgetId() throws -> String {
+        let activeProfile = try getActiveProfile()
+        return activeProfile.ynabBudgetId
+    }
+    
+    func getActiveAccountMappings() throws -> [AccountMapping] {
+        let activeProfile = try getActiveProfile()
+        return activeProfile.accountMappings.map { $0.toLegacyAccountMapping() }
+    }
+    
+    func getActiveCategorizationSettings() throws -> CategorizationSettings {
+        let activeProfile = try getActiveProfile()
+        return activeProfile.categorizationSettings?.toLegacyCategorizationSettings() ?? .default
+    }
+    
+    func addOrUpdateAccountMappingForActiveProfile(upAccountId: String, upAccountName: String, upAccountType: String, ynabAccountId: String, ynabAccountName: String) throws {
+        var activeProfile = try getActiveProfile()
+        
+        // Remove existing mapping for this Up account if it exists
+        let filteredMappings = activeProfile.accountMappings.filter { $0.upAccountId != upAccountId }
+        
+        // Add the new mapping
+        let newMapping = BudgetAccountMapping(
+            upAccountId: upAccountId,
+            upAccountName: upAccountName,
+            upAccountType: upAccountType,
+            ynabAccountId: ynabAccountId,
+            ynabAccountName: ynabAccountName
+        )
+        
+        let updatedProfile = BudgetProfile(
+            id: activeProfile.id,
+            ynabBudgetId: activeProfile.ynabBudgetId,
+            ynabBudgetName: activeProfile.ynabBudgetName,
+            accountMappings: filteredMappings + [newMapping],
+            categorizationSettings: activeProfile.categorizationSettings
+        )
+        
+        try updateProfile(updatedProfile)
+    }
+    
+    func updateCategorizationSettingsForActiveProfile(_ settings: CategorizationSettings) throws {
+        var activeProfile = try getActiveProfile()
+        
+        let budgetSettings = BudgetCategorizationSettings(
+            enabled: settings.enabled,
+            autoApplyDuringSync: settings.autoApplyDuringSync,
+            minConfidenceThreshold: settings.minConfidenceThreshold,
+            suggestNewRules: settings.suggestNewRules
+        )
+        
+        let updatedProfile = BudgetProfile(
+            id: activeProfile.id,
+            ynabBudgetId: activeProfile.ynabBudgetId,
+            ynabBudgetName: activeProfile.ynabBudgetName,
+            accountMappings: activeProfile.accountMappings,
+            categorizationSettings: budgetSettings
+        )
+        
+        try updateProfile(updatedProfile)
     }
 }
 

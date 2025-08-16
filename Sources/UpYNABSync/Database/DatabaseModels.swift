@@ -14,6 +14,7 @@ struct SyncedTransaction {
     let ynabAmount: Int
     let syncTimestamp: String
     let status: String
+    let budgetId: String? // New field for multi-budget support
 }
 
 struct AccountMapping {
@@ -40,6 +41,7 @@ struct SyncLogEntry {
     let transactionsFailed: Int
     let errors: String?
     let syncDurationSeconds: Double
+    let budgetId: String? // New field for multi-budget support
 }
 
 // MARK: - Merchant Learning Models
@@ -55,6 +57,7 @@ struct MerchantRule: Codable {
     let lastUsed: String?
     let createdAt: String
     let updatedAt: String
+    let budgetId: String? // New field for multi-budget support
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -67,6 +70,7 @@ struct MerchantRule: Codable {
         case lastUsed = "last_used"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case budgetId = "budget_id"
     }
 }
 
@@ -79,6 +83,7 @@ struct CategorizationHistory {
     let userAccepted: Bool
     let confidence: Double?
     let createdAt: String
+    let budgetId: String? // New field for multi-budget support
 }
 
 // SQLite table definitions
@@ -103,6 +108,7 @@ class DatabaseTables {
     static let syncedYnabAmount = Expression<Int>("ynab_amount")
     static let syncedSyncTimestamp = Expression<String>("sync_timestamp")
     static let syncedStatus = Expression<String>("status")
+    static let syncedBudgetId = Expression<String?>("budget_id")
     
     // account_mappings columns
     static let mappingId = Expression<Int64>("id")
@@ -127,6 +133,7 @@ class DatabaseTables {
     static let logTransactionsFailed = Expression<Int>("transactions_failed")
     static let logErrors = Expression<String?>("errors")
     static let logSyncDurationSeconds = Expression<Double>("sync_duration_seconds")
+    static let logBudgetId = Expression<String?>("budget_id")
     
     // merchant_rules columns
     static let merchantRuleId = Expression<Int64>("id")
@@ -139,6 +146,7 @@ class DatabaseTables {
     static let merchantRuleLastUsed = Expression<String?>("last_used")
     static let merchantRuleCreatedAt = Expression<String>("created_at")
     static let merchantRuleUpdatedAt = Expression<String>("updated_at")
+    static let merchantRuleBudgetId = Expression<String?>("budget_id")
     
     // categorization_history columns
     static let historyId = Expression<Int64>("id")
@@ -149,6 +157,7 @@ class DatabaseTables {
     static let historyUserAccepted = Expression<Bool>("user_accepted")
     static let historyConfidence = Expression<Double?>("confidence")
     static let historyCreatedAt = Expression<String>("created_at")
+    static let historyBudgetId = Expression<String?>("budget_id")
     
     // database_version columns
     static let versionId = Expression<Int64>("id")
@@ -171,7 +180,8 @@ extension Row {
             ynabTransactionId: self[DatabaseTables.syncedYnabTransactionId],
             ynabAmount: self[DatabaseTables.syncedYnabAmount],
             syncTimestamp: self[DatabaseTables.syncedSyncTimestamp],
-            status: self[DatabaseTables.syncedStatus]
+            status: self[DatabaseTables.syncedStatus],
+            budgetId: self[DatabaseTables.syncedBudgetId]
         )
     }
     
@@ -201,7 +211,8 @@ extension Row {
             transactionsSkipped: self[DatabaseTables.logTransactionsSkipped],
             transactionsFailed: self[DatabaseTables.logTransactionsFailed],
             errors: self[DatabaseTables.logErrors],
-            syncDurationSeconds: self[DatabaseTables.logSyncDurationSeconds]
+            syncDurationSeconds: self[DatabaseTables.logSyncDurationSeconds],
+            budgetId: self[DatabaseTables.logBudgetId]
         )
     }
     
@@ -216,7 +227,8 @@ extension Row {
             usageCount: self[DatabaseTables.merchantRuleUsageCount],
             lastUsed: self[DatabaseTables.merchantRuleLastUsed],
             createdAt: self[DatabaseTables.merchantRuleCreatedAt],
-            updatedAt: self[DatabaseTables.merchantRuleUpdatedAt]
+            updatedAt: self[DatabaseTables.merchantRuleUpdatedAt],
+            budgetId: self[DatabaseTables.merchantRuleBudgetId]
         )
     }
     
@@ -229,7 +241,8 @@ extension Row {
             appliedCategoryId: self[DatabaseTables.historyAppliedCategoryId],
             userAccepted: self[DatabaseTables.historyUserAccepted],
             confidence: self[DatabaseTables.historyConfidence],
-            createdAt: self[DatabaseTables.historyCreatedAt]
+            createdAt: self[DatabaseTables.historyCreatedAt],
+            budgetId: self[DatabaseTables.historyBudgetId]
         )
     }
 }

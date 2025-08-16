@@ -37,6 +37,9 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     @Flag(name: .long, help: "Configure categorization settings")
     var categorization: Bool = false
     
+    @Option(name: .long, help: "Specify budget profile to configure (defaults to active profile)")
+    var budget: String?
+    
     private var upBankingService: UpBankingService { UpBankingService.shared }
     private var ynabService: YNABService { YNABService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
@@ -61,6 +64,26 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
         try await performConfiguration()
         
         displaySuccess("Account mappings configured successfully! You can now run 'up-ynab-sync sync' to start syncing.")
+    }
+    
+    // MARK: - Budget Profile Helper
+    
+    private func getCurrentBudgetProfile() throws -> BudgetProfile {
+        if let budgetName = budget {
+            return try configManager.getProfile(budgetName)
+        } else {
+            return try configManager.getActiveProfile()
+        }
+    }
+    
+    private func getCurrentBudgetContext() throws -> (profile: BudgetProfile, isSpecified: Bool) {
+        if let budgetName = budget {
+            let profile = try configManager.getProfile(budgetName)
+            return (profile, true)
+        } else {
+            let profile = try configManager.getActiveProfile()
+            return (profile, false)
+        }
     }
     
     func validatePrerequisites() async throws {
@@ -98,14 +121,16 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     // MARK: - Configuration Display
     
     private func configureCategorizationSettings() async throws {
-        displayInfo("⚙️ Configuring Categorization Settings")
-        
-        guard configManager.hasConfiguration() else {
-            displayWarning("No configuration found. Run 'up-ynab-sync config' first to set up account mappings.")
-            return
-        }
-        
-        let currentSettings = try configManager.getCategorizationSettings()
+        do {
+            let (profile, isSpecified) = try getCurrentBudgetContext()
+            
+            if isSpecified {
+                displayInfo("⚙️ Configuring Categorization Settings for budget profile: \(profile.id)")
+            } else {
+                displayInfo("⚙️ Configuring Categorization Settings for active profile: \(profile.id)")
+            }
+            
+            let currentSettings = profile.categorizationSettings ?? BudgetCategorizationSettings.default
         
         print("\n📋 Current Settings:")
         print("Categorization enabled: \(currentSettings.enabled ? "Yes" : "No")")
@@ -145,48 +170,62 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
             )
         }
         
-        let newSettings = ConfigManager.CategorizationSettings(
-            enabled: enabledValue,
-            autoApplyDuringSync: autoApplyValue,
-            minConfidenceThreshold: confidenceValue,
-            suggestNewRules: suggestValue
-        )
-        
-        try configManager.updateCategorizationSettings(newSettings)
-        
-        print("\n✅ Categorization settings updated successfully!")
-        print("Categorization: \(newSettings.enabled ? "Enabled" : "Disabled")")
-        if newSettings.enabled {
-            print("Auto-apply: \(newSettings.autoApplyDuringSync ? "Yes" : "No")")
-            print("Confidence threshold: \(Int(newSettings.minConfidenceThreshold * 100))%")
-            print("Suggest new rules: \(newSettings.suggestNewRules ? "Yes" : "No")")
+            let newSettings = BudgetCategorizationSettings(
+                enabled: enabledValue,
+                autoApplyDuringSync: autoApplyValue,
+                minConfidenceThreshold: confidenceValue,
+                suggestNewRules: suggestValue
+            )
+            
+            // Update the profile with new categorization settings
+            let updatedProfile = BudgetProfile(
+                id: profile.id,
+                ynabBudgetId: profile.ynabBudgetId,
+                ynabBudgetName: profile.ynabBudgetName,
+                accountMappings: profile.accountMappings,
+                categorizationSettings: newSettings
+            )
+            
+            try configManager.updateProfile(updatedProfile)
+            
+            print("\n✅ Categorization settings updated successfully!")
+            print("Categorization: \(newSettings.enabled ? "Enabled" : "Disabled")")
+            if newSettings.enabled {
+                print("Auto-apply: \(newSettings.autoApplyDuringSync ? "Yes" : "No")")
+                print("Confidence threshold: \(Int(newSettings.minConfidenceThreshold * 100))%")
+                print("Suggest new rules: \(newSettings.suggestNewRules ? "Yes" : "No")")
+            }
+            
+        } catch ConfigError.noActiveProfile {
+            displayWarning("No budget profiles configured.")
+            displayInfo("💡 Run 'up-ynab-sync budget add <name>' to create your first budget profile")
+        } catch {
+            displayError(error)
         }
     }
     
     private func showCurrentConfiguration() async throws {
-        displayInfo("Current configuration:")
-        
-        guard configManager.hasConfiguration() else {
-            displayWarning("No configuration found. Run 'up-ynab-sync config' to set up account mappings.")
-            return
-        }
-        
         do {
-            let config = try configManager.loadConfiguration()
+            let (profile, isSpecified) = try getCurrentBudgetContext()
             
-            // Get budget name
-            let budgetName = try await ynabService.getBudgetName(budgetId: config.ynabBudgetId)
+            if isSpecified {
+                displayInfo("Configuration for budget profile: \(profile.id)")
+            } else {
+                displayInfo("Current configuration (active profile: \(profile.id)):")
+            }
             
             print("")
-            print("🎯 YNAB Budget: \(budgetName)")
+            print("🎯 YNAB Budget: \(profile.ynabBudgetName)")
+            print("🆔 Budget ID: \(profile.ynabBudgetId)")
             print("")
             print("📊 Account Mappings:")
             
-            if config.accountMappings.isEmpty {
+            if profile.accountMappings.isEmpty {
                 print("  No account mappings configured")
+                print("  💡 Run 'up-ynab-sync config' to set up account mappings")
             } else {
-                for (index, mapping) in config.accountMappings.enumerated() {
-                    let typeIcon = mapping.upAccountType == "TRANSACTIONAL" ? "💳" : "💰"
+                for (index, mapping) in profile.accountMappings.enumerated() {
+                    let typeIcon = mapping.isTransactionAccount ? "💳" : "💰"
                     print("  \(index + 1). \(typeIcon) \(mapping.upAccountName)")
                     print("     → \(mapping.ynabAccountName)")
                     
@@ -199,8 +238,8 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
             }
             
             // Show categorization settings if available
-            if let categorizationSettings = config.categorizationSettings {
-                print("\n🎯 Categorization Settings:")
+            print("🎯 Categorization Settings:")
+            if let categorizationSettings = profile.categorizationSettings {
                 print("  Enabled: \(categorizationSettings.enabled ? "Yes" : "No")")
                 if categorizationSettings.enabled {
                     print("  Auto-apply during sync: \(categorizationSettings.autoApplyDuringSync ? "Yes" : "No")")
@@ -208,10 +247,13 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
                     print("  Suggest new rules: \(categorizationSettings.suggestNewRules ? "Yes" : "No")")
                 }
             } else {
-                print("\n🎯 Categorization Settings: Not configured")
+                print("  Not configured")
                 print("  💡 Run 'up-ynab-sync config --categorization' to set up categorization")
             }
             
+        } catch ConfigError.noActiveProfile {
+            displayWarning("No budget profiles configured.")
+            displayInfo("💡 Run 'up-ynab-sync budget add <name>' to create your first budget profile")
         } catch {
             throw CLIError.configurationError("Failed to load configuration: \(error.localizedDescription)")
         }
@@ -240,35 +282,66 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     // MARK: - Main Configuration Flow
     
     private func performConfiguration() async throws {
-        displayInfo("🔧 Setting up account mappings...")
-        print("")
-        
-        // Step 1: Get and select YNAB budget
-        let selectedBudget = try await selectYNABBudget()
-        
-        // Step 2: Get YNAB accounts for selected budget
-        let ynabAccounts = try await getYNABAccounts(budgetId: selectedBudget.id)
-        
-        // Step 3: Get Up Banking accounts
-        let upAccounts = try await getUpBankingAccounts()
-        
-        // Step 4: Create account mappings
-        let mappings = try await createAccountMappings(
-            upAccounts: upAccounts,
-            ynabAccounts: ynabAccounts
-        )
-        
-        // Step 5: Save configuration
-        let configuration = ConfigManager.Configuration(
-            ynabBudgetId: selectedBudget.id,
-            accountMappings: mappings,
-            categorizationSettings: nil
-        )
-        
-        try configManager.saveConfiguration(configuration)
-        
-        // Step 6: Display summary
-        try await displayConfigurationSummary(configuration: configuration)
+        do {
+            let (currentProfile, isSpecified) = try getCurrentBudgetContext()
+            
+            if isSpecified {
+                displayInfo("🔧 Setting up account mappings for budget profile: \(currentProfile.id)")
+            } else {
+                displayInfo("🔧 Setting up account mappings for active profile: \(currentProfile.id)")
+            }
+            print("")
+            
+            // Use current profile's budget, no need to select again
+            let budgetId = currentProfile.ynabBudgetId
+            let budgetName = currentProfile.ynabBudgetName
+            
+            displayInfo("Using YNAB budget: \(budgetName)")
+            
+            // Step 1: Get YNAB accounts for the profile's budget
+            let ynabAccounts = try await getYNABAccounts(budgetId: budgetId)
+            
+            // Step 2: Get Up Banking accounts
+            let upAccounts = try await getUpBankingAccounts()
+            
+            // Step 3: Create account mappings
+            let mappings = try await createAccountMappings(
+                upAccounts: upAccounts,
+                ynabAccounts: ynabAccounts
+            )
+            
+            // Step 4: Convert legacy mappings to budget mappings
+            let budgetMappings = mappings.map { legacyMapping in
+                BudgetAccountMapping(
+                    upAccountId: legacyMapping.upAccountId,
+                    upAccountName: legacyMapping.upAccountName,
+                    upAccountType: legacyMapping.upAccountType,
+                    ynabAccountId: legacyMapping.ynabAccountId,
+                    ynabAccountName: legacyMapping.ynabAccountName
+                )
+            }
+            
+            // Step 5: Update the budget profile
+            let updatedProfile = BudgetProfile(
+                id: currentProfile.id,
+                ynabBudgetId: currentProfile.ynabBudgetId,
+                ynabBudgetName: currentProfile.ynabBudgetName,
+                accountMappings: budgetMappings,
+                categorizationSettings: currentProfile.categorizationSettings
+            )
+            
+            try configManager.updateProfile(updatedProfile)
+            
+            // Step 6: Display summary
+            try await displayConfigurationSummary(profile: updatedProfile)
+            
+        } catch ConfigError.noActiveProfile {
+            displayWarning("No budget profiles configured.")
+            displayInfo("💡 Run 'up-ynab-sync budget add <name>' to create your first budget profile")
+            throw CLIError.configurationError("No active budget profile. Please create a budget profile first.")
+        } catch {
+            throw error
+        }
     }
     
     // MARK: - YNAB Budget Selection
@@ -429,24 +502,23 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     
     // MARK: - Configuration Summary
     
-    private func displayConfigurationSummary(configuration: ConfigManager.Configuration) async throws {
+    private func displayConfigurationSummary(profile: BudgetProfile) async throws {
         print("📋 Configuration Summary:")
         print("")
         
-        // Get budget name
-        let budgetName = try await ynabService.getBudgetName(budgetId: configuration.ynabBudgetId)
-        print("🎯 YNAB Budget: \(budgetName)")
+        print("🎯 YNAB Budget: \(profile.ynabBudgetName)")
+        print("📋 Budget Profile: \(profile.id)")
         print("")
         
         print("🔗 Account Mappings:")
-        for (index, mapping) in configuration.accountMappings.enumerated() {
-            let typeIcon = mapping.upAccountType == "TRANSACTIONAL" ? "💳" : "💰"
+        for (index, mapping) in profile.accountMappings.enumerated() {
+            let typeIcon = mapping.isTransactionAccount ? "💳" : "💰"
             print("  \(index + 1). \(typeIcon) \(mapping.upAccountName)")
             print("     → \(mapping.ynabAccountName)")
             print("")
         }
         
-        print("✅ Configuration saved to ~/.up-ynab-sync/config.json")
+        print("✅ Configuration saved for budget profile: \(profile.id)")
         print("")
     }
 }

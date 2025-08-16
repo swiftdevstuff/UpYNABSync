@@ -56,6 +56,9 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
     @Flag(name: .long, help: "Enable merchant categorization using learned rules")
     var categorize: Bool = false
     
+    @Option(name: .long, help: "Specify budget profile to sync (defaults to active profile)")
+    var budget: String?
+    
     private var syncService: SyncService { SyncService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
     
@@ -93,7 +96,7 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
         if retryFailed {
             displayInfo("🔄 Retrying previously failed transactions...")
             let syncOptions = SyncOptions(dryRun: dryRun, verbose: verbose, enableCategorization: categorize)
-            let result = try await syncService.retryFailedTransactions(options: syncOptions)
+            let result = try await syncService.retryFailedTransactions(options: syncOptions, budgetId: budget)
             try await displayResults(result: result)
             return
         }
@@ -106,7 +109,7 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
             displayInfo("🔄 Starting transaction sync...")
         }
         
-        let result = try await performSync(options: syncOptions)
+        let result = try await performSync(options: syncOptions, budgetId: budget)
         
         try await displayResults(result: result)
         
@@ -132,16 +135,26 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
             throw CLIError.prerequisiteNotMet("YNAB API token not found. Please run 'up-ynab-sync auth' first.")
         }
         
-        // Check configuration
-        guard configManager.hasConfiguration() else {
-            throw CLIError.prerequisiteNotMet("Account mappings not found. Please run 'up-ynab-sync config' first.")
+        // Check configuration (budget profiles)
+        guard configManager.hasAnyConfiguration() else {
+            throw CLIError.prerequisiteNotMet("No budget profiles found. Please run 'up-ynab-sync budget add <name>' to create a budget profile first.")
         }
         
-        // Validate configuration
+        // Validate budget profile configuration
         do {
-            _ = try configManager.loadConfiguration()
+            if let budgetName = budget {
+                let profile = try configManager.getProfile(budgetName)
+                if profile.accountMappings.isEmpty {
+                    throw CLIError.prerequisiteNotMet("Budget profile '\(budgetName)' has no account mappings. Please run 'up-ynab-sync config --budget \(budgetName)' to configure account mappings.")
+                }
+            } else {
+                let activeProfile = try configManager.getActiveProfile()
+                if activeProfile.accountMappings.isEmpty {
+                    throw CLIError.prerequisiteNotMet("Active budget profile '\(activeProfile.id)' has no account mappings. Please run 'up-ynab-sync config' to configure account mappings.")
+                }
+            }
         } catch {
-            throw CLIError.prerequisiteNotMet("Invalid configuration. Please run 'up-ynab-sync config' to reconfigure.")
+            throw CLIError.prerequisiteNotMet("Invalid budget configuration: \(error.localizedDescription)")
         }
         
         displaySuccess("Prerequisites validated")
@@ -230,14 +243,14 @@ struct SyncCommand: AsyncParsableCommand, BaseCommand {
     
     // MARK: - Sync Execution
     
-    private func performSync(options: SyncOptions) async throws -> SyncResult {
+    private func performSync(options: SyncOptions, budgetId: String?) async throws -> SyncResult {
         do {
             if verbose, let dateRange = options.dateRange {
                 let daysCount = Calendar.current.dateComponents([.day], from: dateRange.start, to: dateRange.end).day ?? 0
                 displayInfo("Syncing \(daysCount) days of transactions from \(DateFormatter.dateOnly.string(from: dateRange.start)) to \(DateFormatter.dateOnly.string(from: dateRange.end))")
             }
             
-            let result = try await syncService.syncTransactions(options: options)
+            let result = try await syncService.syncTransactions(options: options, budgetId: budgetId)
             return result
             
         } catch {

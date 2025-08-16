@@ -29,6 +29,9 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
     @Flag(name: .long, help: "Show database statistics and health information")
     var showDatabase: Bool = false
     
+    @Option(name: .long, help: "Show status for specific budget profile (defaults to active profile)")
+    var budget: String?
+    
     private var syncService: SyncService { SyncService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
     private var upBankingService: UpBankingService { UpBankingService.shared }
@@ -38,7 +41,7 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
         displayInfo("📊 Checking system status...")
         print("")
         
-        let status = try await getSyncStatus()
+        let status = try await getSyncStatus(budgetId: budget)
         
         try await displayOverallStatus(status)
         try await displayConfigurationStatus(status)
@@ -64,9 +67,9 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
     
     // MARK: - Status Retrieval
     
-    private func getSyncStatus() async throws -> SyncStatus {
+    private func getSyncStatus(budgetId: String?) async throws -> SyncStatus {
         do {
-            return try await syncService.getSyncStatus()
+            return try await syncService.getSyncStatus(budgetId: budgetId)
         } catch {
             // Create a basic status if service fails
             let hasTokens = checkTokensAvailable()
@@ -131,22 +134,50 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
     private func displayConfigurationStatus(_ status: SyncStatus) async throws {
         print("⚙️  Configuration:")
         
-        if status.isConfigured {
-            print("   ✅ Account mappings configured")
-            
-            if verbose {
-                do {
-                    let config = try configManager.loadConfiguration()
-                    let budgetName = try await ynabService.getBudgetName(budgetId: config.ynabBudgetId)
-                    print("   📊 YNAB Budget: \(budgetName)")
-                    print("   🔗 Mappings: \(config.accountMappings.count) accounts")
-                } catch {
-                    print("   ⚠️  Error loading configuration details: \(error.localizedDescription)")
+        do {
+            if let budgetName = budget {
+                let profile = try configManager.getProfile(budgetName)
+                print("   📋 Budget Profile: \(budgetName)")
+                print("   📊 YNAB Budget: \(profile.ynabBudgetName)")
+                print("   🔗 Account Mappings: \(profile.accountMappings.count) accounts")
+                
+                if profile.accountMappings.isEmpty {
+                    print("   ❌ No account mappings configured")
+                    print("   💡 Run 'up-ynab-sync config --budget \(budgetName)' to configure mappings")
+                } else {
+                    print("   ✅ Account mappings configured")
                 }
+                
+            } else if configManager.hasAnyConfiguration() {
+                let activeProfile = try configManager.getActiveProfile()
+                let allProfiles = try configManager.getAllProfiles()
+                
+                print("   📋 Active Budget Profile: \(activeProfile.id)")
+                print("   📊 YNAB Budget: \(activeProfile.ynabBudgetName)")
+                print("   🔗 Account Mappings: \(activeProfile.accountMappings.count) accounts")
+                print("   📈 Total Profiles: \(allProfiles.count)")
+                
+                if activeProfile.accountMappings.isEmpty {
+                    print("   ❌ No account mappings configured for active profile")
+                    print("   💡 Run 'up-ynab-sync config' to configure mappings")
+                } else {
+                    print("   ✅ Account mappings configured")
+                }
+                
+                if verbose && allProfiles.count > 1 {
+                    print("   📋 All Profiles:")
+                    for profile in allProfiles {
+                        let isActive = profile.id == activeProfile.id
+                        let indicator = isActive ? " (active)" : ""
+                        print("     • \(profile.id): \(profile.ynabBudgetName)\(indicator)")
+                    }
+                }
+            } else {
+                print("   ❌ No budget profiles configured")
+                print("   💡 Run 'up-ynab-sync budget add <name>' to create your first budget profile")
             }
-        } else {
-            print("   ❌ Account mappings not configured")
-            print("   💡 Run 'up-ynab-sync config' to set up account mappings")
+        } catch {
+            print("   ⚠️  Error loading configuration: \(error.localizedDescription)")
         }
         
         if status.hasValidTokens {

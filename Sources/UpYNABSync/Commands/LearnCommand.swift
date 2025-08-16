@@ -38,10 +38,25 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
     @Flag(name: .long, help: "Auto-approve obvious patterns without asking")
     var autoApprove: Bool = false
     
+    @Option(name: .long, help: "Specify budget profile for learning (defaults to active profile)")
+    var budget: String?
+    
     private var upBankingService: UpBankingService { UpBankingService.shared }
     private var ynabService: YNABService { YNABService.shared }
     private var configManager: ConfigManager { ConfigManager.shared }
     private var merchantLearningService: MerchantLearningService { MerchantLearningService.shared }
+    
+    // MARK: - Budget Profile Helper
+    
+    private func getBudgetId() throws -> String {
+        if let budgetName = budget {
+            let profile = try configManager.getProfile(budgetName)
+            return profile.ynabBudgetId
+        } else {
+            let activeProfile = try configManager.getActiveProfile()
+            return activeProfile.ynabBudgetId
+        }
+    }
     
     func run() async throws {
         try await validatePrerequisites()
@@ -201,12 +216,14 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
                 displayInfo("Auto-approving obvious pattern: \(merchantPattern) → \(autoCategory.displayName)")
                 
                 let payeeName = cleanPayeeName(transaction.displayDescription)
+                let budgetId = try getBudgetId()
                 try merchantLearningService.createMerchantRule(
                     pattern: merchantPattern,
                     categoryId: autoCategory.id,
                     categoryName: autoCategory.displayName,
                     payeeName: payeeName,
-                    confidence: 0.9
+                    confidence: 0.9,
+                    budgetId: budgetId
                 )
                 
                 return (ruleCreated: true, skipped: false)
@@ -288,12 +305,14 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
         
         // Create the rule
         do {
+            let budgetId = try getBudgetId()
             try merchantLearningService.createMerchantRule(
                 pattern: pattern,
                 categoryId: selectedCategory.id,
                 categoryName: selectedCategory.displayName,
                 payeeName: finalPayeeName,
-                confidence: 1.0
+                confidence: 1.0,
+                budgetId: budgetId
             )
             
             displaySuccess("Rule created successfully!")
@@ -420,12 +439,14 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
             .map { $0.capitalized }
             .joined(separator: " ")
         
+        let budgetId = try getBudgetId()
         try merchantLearningService.createMerchantRule(
             pattern: suggestion.pattern.merchantPattern,
             categoryId: suggestion.pattern.categoryId,
             categoryName: suggestion.pattern.categoryName,
             payeeName: payeeName,
-            confidence: suggestion.pattern.confidence
+            confidence: suggestion.pattern.confidence,
+            budgetId: budgetId
         )
         
         displaySuccess("Created rule: \(suggestion.pattern.merchantPattern) → \(suggestion.pattern.categoryName)")

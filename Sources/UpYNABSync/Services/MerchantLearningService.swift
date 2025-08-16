@@ -52,7 +52,8 @@ class MerchantLearningService: @unchecked Sendable {
         categoryId: String,
         categoryName: String,
         payeeName: String,
-        confidence: Double = 1.0
+        confidence: Double = 1.0,
+        budgetId: String
     ) throws {
         logger.debug("Creating merchant rule: \(pattern) → \(categoryName)")
         
@@ -79,7 +80,8 @@ class MerchantLearningService: @unchecked Sendable {
             usageCount: 0,
             lastUsed: nil,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            budgetId: budgetId
         )
         
         do {
@@ -165,7 +167,8 @@ class MerchantLearningService: @unchecked Sendable {
         suggestedCategoryId: String?,
         appliedCategoryId: String?,
         userAccepted: Bool,
-        confidence: Double?
+        confidence: Double?,
+        budgetId: String
     ) throws {
         let now = ISO8601DateFormatter().string(from: Date())
         let history = CategorizationHistory(
@@ -176,7 +179,8 @@ class MerchantLearningService: @unchecked Sendable {
             appliedCategoryId: appliedCategoryId,
             userAccepted: userAccepted,
             confidence: confidence,
-            createdAt: now
+            createdAt: now,
+            budgetId: budgetId
         )
         
         do {

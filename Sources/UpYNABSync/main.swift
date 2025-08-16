@@ -11,9 +11,16 @@ struct UpYNABSync: AsyncParsableCommand {
         
         Getting Started:
         1. Run 'up-ynab-sync auth' to set up your API tokens
-        2. Run 'up-ynab-sync config' to configure account mappings
-        3. Run 'up-ynab-sync sync' to perform your first sync
-        4. Run 'up-ynab-sync install' to set up automatic daily syncing
+        2. Run 'up-ynab-sync budget add <name>' to create your first budget profile
+        3. Run 'up-ynab-sync config' to configure account mappings
+        4. Run 'up-ynab-sync sync' to perform your first sync
+        5. Run 'up-ynab-sync install' to set up automatic daily syncing
+        
+        Multi-Budget Management:
+        • Run 'up-ynab-sync budget list' to see all configured budget profiles
+        • Run 'up-ynab-sync budget switch <name>' to change active budget
+        • Run 'up-ynab-sync config --budget <name>' to configure specific budget
+        • Run 'up-ynab-sync sync --budget <name>' to sync specific budget
         
         Smart Categorization (Optional):
         • Run 'up-ynab-sync learn' to create merchant categorization rules
@@ -28,9 +35,10 @@ struct UpYNABSync: AsyncParsableCommand {
         
         For help with any command, use --help (e.g., 'up-ynab-sync sync --help')
         """,
-        version: "1.1.1",
+        version: "1.2.0",
         subcommands: [
             AuthCommand.self,
+            BudgetCommand.self,
             ConfigCommand.self,
             SyncCommand.self,
             StatusCommand.self,
