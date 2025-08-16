@@ -134,6 +134,27 @@ struct InteractiveInput {
         return choice - 1
     }
     
+    static func readChoiceIndexWithSkip(prompt: String, choices: [String]) -> Int? {
+        print(prompt)
+        for (index, choice) in choices.enumerated() {
+            print("\(index + 1). \(choice)")
+        }
+        print("\(choices.count + 1). Skip this account")
+        print("Enter choice (1-\(choices.count + 1)): ", terminator: "")
+        
+        guard let input = Swift.readLine(),
+              let choice = Int(input),
+              choice >= 1 && choice <= choices.count + 1 else {
+            return nil
+        }
+        
+        if choice == choices.count + 1 {
+            return -1 // Return -1 to indicate skip
+        }
+        
+        return choice - 1
+    }
+    
     static func readConfirmation(prompt: String, defaultValue: Bool = false) -> Bool {
         let defaultText = defaultValue ? "y/n" : "y/n"
         print("\(prompt) (\(defaultText)): ", terminator: "")

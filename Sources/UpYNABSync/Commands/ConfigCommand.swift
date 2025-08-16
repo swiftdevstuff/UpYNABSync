@@ -395,11 +395,17 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
                 return "\(account.name) (\(balance))"
             }
             
-            guard let selectedIndex = InteractiveInput.readChoiceIndex(
-                prompt: "Select YNAB account (1-\(ynabAccounts.count)):",
+            guard let selectedIndex = InteractiveInput.readChoiceIndexWithSkip(
+                prompt: "Select YNAB account (1-\(ynabAccounts.count)) or skip:",
                 choices: ynabAccountNames
             ) else {
                 throw CLIError.invalidInput("Invalid account selection")
+            }
+            
+            if selectedIndex == -1 {
+                displayInfo("⏭️ Skipped \(upAccount.displayName)")
+                print("")
+                continue
             }
             
             let selectedYnabAccount = ynabAccounts[selectedIndex]
