@@ -106,9 +106,12 @@ struct InteractiveInput {
     static func readSecureLine(prompt: String) -> String? {
         print(prompt, terminator: "")
         
-        // For secure input, we'd ideally use getpass() or similar
-        // For now, we'll use regular input but this should be enhanced
-        return Swift.readLine()
+        // Use getpass() for secure input that doesn't echo to terminal
+        guard let cString = getpass("") else {
+            return nil
+        }
+        
+        return String(cString: cString)
     }
     
     static func readChoice(prompt: String, choices: [String]) -> String? {

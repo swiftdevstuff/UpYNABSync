@@ -59,6 +59,7 @@ class SyncDatabase: @unchecked Sendable {
             db = try Connection(dbPath.path)
             try createTables()
             try migrateDatabase()
+            try ConfigManager.shared.ensureDatabaseSecurity()
             logger.info("Database initialized at: \(dbPath.path)")
         } catch {
             logger.error("Failed to initialize database: \(error)")

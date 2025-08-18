@@ -75,6 +75,7 @@ class ConfigManager: @unchecked Sendable {
         case cannotDeleteActiveProfile(String)
         case noActiveProfile
         case migrationFailed(String)
+        case permissionError(String)
         
         var errorDescription: String? {
             switch self {
@@ -98,6 +99,8 @@ class ConfigManager: @unchecked Sendable {
                 return "No active budget profile configured"
             case .migrationFailed(let reason):
                 return "Configuration migration failed: \(reason)"
+            case .permissionError(let message):
+                return "Permission error: \(message)"
             }
         }
     }
@@ -106,9 +109,26 @@ class ConfigManager: @unchecked Sendable {
         if !FileManager.default.fileExists(atPath: configDirectoryPath.path) {
             do {
                 try FileManager.default.createDirectory(at: configDirectoryPath, withIntermediateDirectories: true)
+                try setSecurePermissions(for: configDirectoryPath, isDirectory: true)
             } catch {
                 throw ConfigError.fileSystemError(error)
             }
+        } else {
+            // Ensure existing directory has secure permissions
+            try setSecurePermissions(for: configDirectoryPath, isDirectory: true)
+        }
+    }
+    
+    private func setSecurePermissions(for url: URL, isDirectory: Bool) throws {
+        do {
+            let permissions: UInt16 = isDirectory ? 0o700 : 0o600
+            try FileManager.default.setAttributes([
+                .posixPermissions: permissions
+            ], ofItemAtPath: url.path)
+        } catch {
+            // Log warning but don't fail the operation
+            Logger.shared.warning("Failed to set secure permissions for \(url.path): \(error.localizedDescription)")
+            throw ConfigError.permissionError("Failed to set secure permissions: \(error.localizedDescription)")
         }
     }
     
@@ -120,6 +140,7 @@ class ConfigManager: @unchecked Sendable {
             encoder.outputFormatting = .prettyPrinted
             let data = try encoder.encode(configuration)
             try data.write(to: configFilePath)
+            try setSecurePermissions(for: configFilePath, isDirectory: false)
         } catch let error as EncodingError {
             throw ConfigError.encodingError(error)
         } catch {
@@ -302,6 +323,7 @@ class ConfigManager: @unchecked Sendable {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(configuration)
             try data.write(to: multiBudgetConfigFilePath)
+            try setSecurePermissions(for: multiBudgetConfigFilePath, isDirectory: false)
         } catch let error as EncodingError {
             throw ConfigError.encodingError(error)
         } catch {
@@ -531,9 +553,20 @@ extension ConfigManager {
         if !FileManager.default.fileExists(atPath: logsDir.path) {
             do {
                 try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+                try setSecurePermissions(for: logsDir, isDirectory: true)
             } catch {
                 throw ConfigError.fileSystemError(error)
             }
+        } else {
+            // Ensure existing directory has secure permissions
+            try setSecurePermissions(for: logsDir, isDirectory: true)
+        }
+    }
+    
+    func ensureDatabaseSecurity() throws {
+        let dbPath = getDatabasePath()
+        if FileManager.default.fileExists(atPath: dbPath.path) {
+            try setSecurePermissions(for: dbPath, isDirectory: false)
         }
     }
 }
