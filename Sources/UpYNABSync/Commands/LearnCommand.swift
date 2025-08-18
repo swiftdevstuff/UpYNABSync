@@ -82,7 +82,7 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
             throw CLIError.prerequisiteNotMet("YNAB API token not found. Please run 'up-ynab-sync auth' first.")
         }
         
-        guard configManager.hasConfiguration() else {
+        guard configManager.hasAnyConfiguration() else {
             throw CLIError.prerequisiteNotMet("Configuration not found. Please run 'up-ynab-sync config' first.")
         }
         
@@ -94,9 +94,6 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
     private func learnFromRecentTransactions() async throws {
         displayInfo("🎓 Learning Mode: Analyzing recent transactions")
         
-        // Get configuration
-        let config = try configManager.loadConfiguration()
-        
         // Get recent transactions from Up Banking
         let endDate = Date()
         let startDate = Calendar.current.date(byAdding: .day, value: -days, to: endDate)!
@@ -105,7 +102,7 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
         
         var allTransactions: [UpTransaction] = []
         
-        for mapping in config.accountMappings {
+        for mapping in try configManager.getActiveAccountMappings() {
             displayInfo("Fetching transactions for \(mapping.upAccountName)...")
             
             let transactions = try await upBankingService.getTransactions(
@@ -151,8 +148,7 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
     }
     
     private func runInteractiveLearningSession(_ transactions: [UpTransaction]) async throws {
-        let config = try configManager.loadConfiguration()
-        let categories = try await ynabService.getCategories(budgetId: config.ynabBudgetId)
+        let categories = try await ynabService.getCategories(budgetId: try configManager.getActiveBudgetId())
         
         print("\n🎓 Interactive Learning Session")
         print(String(repeating: "=", count: 50))
@@ -328,14 +324,13 @@ struct LearnCommand: AsyncParsableCommand, BaseCommand {
     private func learnFromYNABPatterns() async throws {
         displayInfo("🔍 Learning from existing YNAB categorization patterns")
         
-        let config = try configManager.loadConfiguration()
         let patternAnalyzer = YNABPatternAnalyzer.shared
         
         do {
             displayInfo("Analyzing YNAB transactions for the last \(days) days...")
             
             let patterns = try await patternAnalyzer.analyzeCategorizationPatterns(
-                budgetId: config.ynabBudgetId,
+                budgetId: try configManager.getActiveBudgetId(),
                 days: days
             )
             

@@ -516,7 +516,7 @@ struct ReviewCommand: AsyncParsableCommand, BaseCommand {
         let merchantService = MerchantLearningService.shared
         let configManager = ConfigManager.shared
         
-        guard configManager.hasConfiguration() else {
+        guard configManager.hasAnyConfiguration() else {
             displayWarning("No configuration found. Run 'up-ynab-sync config' first.")
             return
         }

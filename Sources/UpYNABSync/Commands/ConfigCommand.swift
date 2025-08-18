@@ -86,6 +86,131 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
         }
     }
     
+    private func ensureBudgetProfileExists() async throws -> BudgetProfile {
+        // If a specific budget is specified, use it
+        if let budgetName = budget {
+            return try configManager.getProfile(budgetName)
+        }
+        
+        // Check if any profiles exist
+        let allProfiles = try? configManager.getAllProfiles()
+        
+        if allProfiles?.isEmpty ?? true {
+            // No profiles exist - guide through first time setup
+            return try await handleFirstTimeSetup()
+        } else {
+            // Profiles exist, check if there's an active one
+            do {
+                return try configManager.getActiveProfile()
+            } catch ConfigError.noActiveProfile {
+                // Profiles exist but none are active - help select one
+                return try await handleNoActiveProfile(profiles: allProfiles!)
+            }
+        }
+    }
+    
+    private func handleFirstTimeSetup() async throws -> BudgetProfile {
+        displayInfo("🎉 Welcome! Let's set up your first budget profile.")
+        print("")
+        
+        // Get profile name from user
+        let profileName: String
+        repeat {
+            print("What would you like to name your budget profile? (e.g., 'personal', 'main'): ", terminator: "")
+            if let input = InteractiveInput.readLine(prompt: ""), !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                profileName = input.trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            } else {
+                displayWarning("Please enter a valid profile name.")
+            }
+        } while true
+        
+        // Select YNAB budget
+        let (selectedBudgetId, selectedBudgetName) = try await selectYNABBudgetForSetup()
+        
+        // Create new budget profile
+        let newProfile = BudgetProfile(
+            id: profileName,
+            ynabBudgetId: selectedBudgetId,
+            ynabBudgetName: selectedBudgetName
+        )
+        
+        // Add and activate profile
+        try configManager.addProfile(newProfile)
+        try configManager.setActiveProfile(profileName)
+        
+        displaySuccess("✅ Budget profile '\(profileName)' created and activated!")
+        displayInfo("YNAB Budget: \(selectedBudgetName)")
+        print("")
+        
+        return newProfile
+    }
+    
+    private func handleNoActiveProfile(profiles: [BudgetProfile]) async throws -> BudgetProfile {
+        displayInfo("📋 Multiple budget profiles found, but none are currently active.")
+        print("")
+        print("Available budget profiles:")
+        
+        for (index, profile) in profiles.enumerated() {
+            print("\(index + 1). \(profile.displayName) (YNAB: \(profile.ynabBudgetName))")
+        }
+        
+        print("")
+        let profileNames = profiles.map { $0.displayName }
+        
+        guard let selectedIndex = InteractiveInput.readChoiceIndex(
+            prompt: "Select which budget profile to use:",
+            choices: profileNames
+        ) else {
+            throw CLIError.invalidInput("Invalid profile selection")
+        }
+        
+        let selectedProfile = profiles[selectedIndex]
+        
+        // Make it active
+        try configManager.setActiveProfile(selectedProfile.id)
+        
+        displaySuccess("✅ Activated budget profile: \(selectedProfile.displayName)")
+        displayInfo("YNAB Budget: \(selectedProfile.ynabBudgetName)")
+        print("")
+        
+        return selectedProfile
+    }
+    
+    private func selectYNABBudgetForSetup() async throws -> (String, String) {
+        displayInfo("📊 Fetching your YNAB budgets...")
+        
+        let budgets = try await ynabService.getBudgets()
+        
+        guard !budgets.isEmpty else {
+            throw CLIError.configurationError("No YNAB budgets found. Please create a budget in YNAB first.")
+        }
+        
+        if budgets.count == 1 {
+            let budget = budgets[0]
+            displayInfo("Using your YNAB budget: \(budget.name)")
+            return (budget.id, budget.name)
+        }
+        
+        // Multiple budgets - let user choose
+        print("")
+        print("📊 Available YNAB budgets:")
+        let budgetNames = budgets.map { $0.name }
+        
+        guard let selectedIndex = InteractiveInput.readChoiceIndex(
+            prompt: "Select your YNAB budget:",
+            choices: budgetNames
+        ) else {
+            throw CLIError.invalidInput("Invalid budget selection")
+        }
+        
+        let selectedBudget = budgets[selectedIndex]
+        displaySuccess("Selected budget: \(selectedBudget.name)")
+        print("")
+        
+        return (selectedBudget.id, selectedBudget.name)
+    }
+    
     func validatePrerequisites() async throws {
         // Check API tokens
         let keychain = KeychainManager.shared
@@ -262,7 +387,7 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     private func resetConfiguration() async throws {
         displayWarning("Resetting all account mappings...")
         
-        if configManager.hasConfiguration() {
+        if configManager.hasAnyConfiguration() {
             let shouldReset = InteractiveInput.readConfirmation(
                 prompt: "This will delete all existing account mappings. Are you sure?",
                 defaultValue: false
@@ -282,66 +407,54 @@ struct ConfigCommand: AsyncParsableCommand, BaseCommand {
     // MARK: - Main Configuration Flow
     
     private func performConfiguration() async throws {
-        do {
-            let (currentProfile, isSpecified) = try getCurrentBudgetContext()
-            
-            if isSpecified {
-                displayInfo("🔧 Setting up account mappings for budget profile: \(currentProfile.id)")
-            } else {
-                displayInfo("🔧 Setting up account mappings for active profile: \(currentProfile.id)")
-            }
-            print("")
-            
-            // Use current profile's budget, no need to select again
-            let budgetId = currentProfile.ynabBudgetId
-            let budgetName = currentProfile.ynabBudgetName
-            
-            displayInfo("Using YNAB budget: \(budgetName)")
-            
-            // Step 1: Get YNAB accounts for the profile's budget
-            let ynabAccounts = try await getYNABAccounts(budgetId: budgetId)
-            
-            // Step 2: Get Up Banking accounts
-            let upAccounts = try await getUpBankingAccounts()
-            
-            // Step 3: Create account mappings
-            let mappings = try await createAccountMappings(
-                upAccounts: upAccounts,
-                ynabAccounts: ynabAccounts
+        // Check budget profile status and handle setup if needed
+        let currentProfile = try await ensureBudgetProfileExists()
+        
+        displayInfo("🔧 Setting up account mappings for budget profile: \(currentProfile.id)")
+        print("")
+        
+        // Use current profile's budget, no need to select again
+        let budgetId = currentProfile.ynabBudgetId
+        let budgetName = currentProfile.ynabBudgetName
+        
+        displayInfo("Using YNAB budget: \(budgetName)")
+        
+        // Step 1: Get YNAB accounts for the profile's budget
+        let ynabAccounts = try await getYNABAccounts(budgetId: budgetId)
+        
+        // Step 2: Get Up Banking accounts
+        let upAccounts = try await getUpBankingAccounts()
+        
+        // Step 3: Create account mappings
+        let mappings = try await createAccountMappings(
+            upAccounts: upAccounts,
+            ynabAccounts: ynabAccounts
+        )
+        
+        // Step 4: Convert legacy mappings to budget mappings
+        let budgetMappings = mappings.map { legacyMapping in
+            BudgetAccountMapping(
+                upAccountId: legacyMapping.upAccountId,
+                upAccountName: legacyMapping.upAccountName,
+                upAccountType: legacyMapping.upAccountType,
+                ynabAccountId: legacyMapping.ynabAccountId,
+                ynabAccountName: legacyMapping.ynabAccountName
             )
-            
-            // Step 4: Convert legacy mappings to budget mappings
-            let budgetMappings = mappings.map { legacyMapping in
-                BudgetAccountMapping(
-                    upAccountId: legacyMapping.upAccountId,
-                    upAccountName: legacyMapping.upAccountName,
-                    upAccountType: legacyMapping.upAccountType,
-                    ynabAccountId: legacyMapping.ynabAccountId,
-                    ynabAccountName: legacyMapping.ynabAccountName
-                )
-            }
-            
-            // Step 5: Update the budget profile
-            let updatedProfile = BudgetProfile(
-                id: currentProfile.id,
-                ynabBudgetId: currentProfile.ynabBudgetId,
-                ynabBudgetName: currentProfile.ynabBudgetName,
-                accountMappings: budgetMappings,
-                categorizationSettings: currentProfile.categorizationSettings
-            )
-            
-            try configManager.updateProfile(updatedProfile)
-            
-            // Step 6: Display summary
-            try await displayConfigurationSummary(profile: updatedProfile)
-            
-        } catch ConfigError.noActiveProfile {
-            displayWarning("No budget profiles configured.")
-            displayInfo("💡 Run 'up-ynab-sync budget add <name>' to create your first budget profile")
-            throw CLIError.configurationError("No active budget profile. Please create a budget profile first.")
-        } catch {
-            throw error
         }
+        
+        // Step 5: Update the budget profile
+        let updatedProfile = BudgetProfile(
+            id: currentProfile.id,
+            ynabBudgetId: currentProfile.ynabBudgetId,
+            ynabBudgetName: currentProfile.ynabBudgetName,
+            accountMappings: budgetMappings,
+            categorizationSettings: currentProfile.categorizationSettings
+        )
+        
+        try configManager.updateProfile(updatedProfile)
+        
+        // Step 6: Display summary
+        try await displayConfigurationSummary(profile: updatedProfile)
     }
     
     // MARK: - YNAB Budget Selection

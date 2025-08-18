@@ -80,7 +80,7 @@ struct InstallCommand: AsyncParsableCommand, BaseCommand {
                 throw CLIError.prerequisiteNotMet("YNAB API token not found. Please run 'up-ynab-sync auth' first.")
             }
             
-            guard configManager.hasConfiguration() else {
+            guard configManager.hasAnyConfiguration() else {
                 throw CLIError.prerequisiteNotMet("Account mappings not found. Please run 'up-ynab-sync config' first.")
             }
         }

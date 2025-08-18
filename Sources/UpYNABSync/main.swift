@@ -13,7 +13,8 @@ struct UpYNABSync: AsyncParsableCommand {
         1. Run 'up-ynab-sync auth' to set up your API tokens
         2. Run 'up-ynab-sync budget add <name>' to create your first budget profile
         3. Run 'up-ynab-sync config' to configure account mappings
-        4. Run 'up-ynab-sync sync' to perform your first sync
+        4. Run 'up-ynab-sync sync' to perform your first sync (syncs last 24 hours by default)
+           • Use --days N to sync last N days, or --full for custom date range
         5. Run 'up-ynab-sync install' to set up automatic daily syncing
         
         Multi-Budget Management:

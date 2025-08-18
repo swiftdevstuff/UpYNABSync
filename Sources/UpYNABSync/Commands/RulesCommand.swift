@@ -206,7 +206,7 @@ struct RulesCommand: AsyncParsableCommand, BaseCommand {
         displayInfo("➕ Adding new merchant rule for pattern: \(pattern)")
         
         // Validate prerequisites
-        guard configManager.hasConfiguration() else {
+        guard configManager.hasAnyConfiguration() else {
             throw CLIError.prerequisiteNotMet("Configuration not found. Please run 'up-ynab-sync config' first.")
         }
         

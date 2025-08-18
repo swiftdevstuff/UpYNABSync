@@ -73,7 +73,7 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
         } catch {
             // Create a basic status if service fails
             let hasTokens = checkTokensAvailable()
-            let hasConfig = configManager.hasConfiguration()
+            let hasConfig = configManager.hasAnyConfiguration()
             
             return SyncStatus(
                 isConfigured: hasConfig,
@@ -328,7 +328,7 @@ struct StatusCommand: AsyncParsableCommand, BaseCommand {
     private func displayCategorizationStatus() async throws {
         let configManager = ConfigManager.shared
         
-        guard configManager.hasConfiguration() else {
+        guard configManager.hasAnyConfiguration() else {
             return
         }
         

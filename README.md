@@ -236,7 +236,7 @@ up-ynab-sync rules --cleanup
 |---------|-------------|
 | `up-ynab-sync auth` | Set up API authentication for Up Banking and YNAB |
 | `up-ynab-sync config` | Configure account mappings between Up Banking and YNAB |
-| `up-ynab-sync sync` | Perform transaction sync with optional categorization |
+| `up-ynab-sync sync` | Perform transaction sync (24hrs default, --days/--full for custom timeframes) |
 | `up-ynab-sync status` | Check system health and performance metrics |
 | `up-ynab-sync review` | Review and fix failed transactions |
 
