@@ -220,24 +220,56 @@ extension BudgetCommand {
             abstract: "Switch to a different budget profile"
         )
         
-        @Argument(help: "Name of the budget profile to switch to")
-        var name: String
+        @Argument(help: "Name of the budget profile to switch to (omit to cycle to next)")
+        var name: String?
         
         private var configManager: ConfigManager { ConfigManager.shared }
         
         func run() async throws {
-            displayInfo("🔄 Switching to budget profile: \(name)")
-            
             do {
-                // Verify profile exists
-                let profile = try configManager.getProfile(name)
-                
-                // Switch to the profile
-                try configManager.setActiveProfile(name)
-                
-                displaySuccess("Switched to budget profile: \(profile.displayName)")
-                displayInfo("YNAB Budget: \(profile.ynabBudgetName)")
-                displayInfo("Account Mappings: \(profile.accountMappings.count)")
+                if let specificName = name {
+                    // Switch to specific profile (existing behavior)
+                    displayInfo("🔄 Switching to budget profile: \(specificName)")
+                    
+                    // Verify profile exists
+                    let profile = try configManager.getProfile(specificName)
+                    
+                    // Switch to the profile
+                    try configManager.setActiveProfile(specificName)
+                    
+                    displaySuccess("Switched to budget profile: \(profile.displayName)")
+                    displayInfo("YNAB Budget: \(profile.ynabBudgetName)")
+                    displayInfo("Account Mappings: \(profile.accountMappings.count)")
+                    
+                } else {
+                    // Cycle to next profile
+                    displayInfo("🔄 Cycling to next budget profile...")
+                    
+                    let allProfiles = try configManager.getAllProfiles()
+                    
+                    guard allProfiles.count > 1 else {
+                        throw CLIError.configurationError("Cannot cycle: Only \(allProfiles.count) budget profile(s) configured. Add more profiles to enable cycling.")
+                    }
+                    
+                    let currentActiveProfile = try configManager.getActiveProfile()
+                    
+                    // Find current profile index in sorted array
+                    guard let currentIndex = allProfiles.firstIndex(where: { $0.id == currentActiveProfile.id }) else {
+                        throw CLIError.configurationError("Current active profile not found in profile list")
+                    }
+                    
+                    // Calculate next index with wraparound
+                    let nextIndex = (currentIndex + 1) % allProfiles.count
+                    let nextProfile = allProfiles[nextIndex]
+                    
+                    // Switch to next profile
+                    try configManager.setActiveProfile(nextProfile.id)
+                    
+                    displaySuccess("Switched to budget profile: \(nextProfile.displayName)")
+                    displayInfo("YNAB Budget: \(nextProfile.ynabBudgetName)")
+                    displayInfo("Account Mappings: \(nextProfile.accountMappings.count)")
+                    displayInfo("📊 Profile \(nextIndex + 1) of \(allProfiles.count)")
+                }
                 
             } catch {
                 displayError(error)
